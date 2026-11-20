@@ -1,0 +1,6 @@
+{
+  "name": "Topchan Ops",
+  "description": "Автопилот ресепшна, Telegram Mini App консоль, мост Bnovo/E-mehmon и 6-карманная мультивалютная касса для Topchan Hostel (Ташкент).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
