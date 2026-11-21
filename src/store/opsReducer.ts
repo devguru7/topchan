@@ -6,9 +6,13 @@ import {
   handleCheckIn,
   handleCheckOut,
   handleCommitParsedCommand,
+  handleCompleteNightAudit,
   handleExtendOrMoveStay,
   handleIssueRefund,
   handleMarkEmehmonRegistered,
+  handleMoveOrResizeSegment,
+  handleRestoreBookingsAndRooms,
+  handleSplitStayBooking,
 } from './handlers/bookingHandlers';
 import {
   handleAddPettyCash,
@@ -17,21 +21,28 @@ import {
   handleRecordCashCalc,
 } from './handlers/cashHandlers';
 import {
+  handleAddLostFound,
   handleAddLuggage,
+  handleAddMailInquiry,
   handleAddTransfer,
   handleAdjustStock,
   handleAdminApproveHousekeeping,
   handleCompleteLaundryJob,
   handleCycleTransferStatus,
+  handleDismissMailInquiry,
+  handleFinishHousekeepingTask,
   handleMaidMarkCleaned,
   handleReleaseLuggage,
+  handleResolveLostFound,
   handleResolveTelegramAlert,
   handleSetRoomHousekeepingStatus,
   handleSpeedUpLaundry,
+  handleStartHousekeepingTask,
   handleStartLaundry,
   handleSubmitGuestQrRequest,
   handleToggleChecklist,
   handleUpdateTelegramAlertDraft,
+  handleUpsertGuestProfile,
 } from './handlers/serviceHandlers';
 import {
   handleAddPhysicalRoom,
@@ -58,6 +69,14 @@ function applyAction(state: AppState, action: OpsAction): AppState {
       return handleIssueRefund(state, action.payload, action.nowIso);
     case 'EXTEND_OR_MOVE_STAY':
       return handleExtendOrMoveStay(state, action.payload, action.nowIso, action.todayIso);
+    case 'MOVE_OR_RESIZE_SEGMENT':
+      return handleMoveOrResizeSegment(state, action.payload, action.nowIso, action.todayIso);
+    case 'RESTORE_BOOKINGS_AND_ROOMS':
+      return handleRestoreBookingsAndRooms(state, action.payload, action.nowIso);
+    case 'SPLIT_STAY_BOOKING':
+      return handleSplitStayBooking(state, action.payload, action.nowIso, action.todayIso);
+    case 'COMPLETE_NIGHT_AUDIT':
+      return handleCompleteNightAudit(state, action.payload, action.nowIso, action.todayIso);
     case 'COMMIT_PARSED_COMMAND':
       return handleCommitParsedCommand(state, action.payload, action.nowIso, action.todayIso);
     case 'MARK_EMEHMON_REGISTERED':
@@ -80,6 +99,10 @@ function applyAction(state: AppState, action: OpsAction): AppState {
       return handleCompleteLaundryJob(state, action.payload, action.timeHm);
     case 'SPEED_UP_LAUNDRY':
       return handleSpeedUpLaundry(state, action.payload, action.timeHm);
+    case 'START_HOUSEKEEPING_TASK':
+      return handleStartHousekeepingTask(state, action.payload, action.nowIso);
+    case 'FINISH_HOUSEKEEPING_TASK':
+      return handleFinishHousekeepingTask(state, action.payload, action.nowIso);
     case 'MAID_MARK_CLEANED':
       return handleMaidMarkCleaned(state, action.payload, action.timeHm);
     case 'ADMIN_APPROVE_HOUSEKEEPING':
@@ -90,6 +113,16 @@ function applyAction(state: AppState, action: OpsAction): AppState {
       return handleAddLuggage(state, action.payload, action.nowIso);
     case 'RELEASE_LUGGAGE':
       return handleReleaseLuggage(state, action.payload);
+    case 'ADD_LOST_FOUND':
+      return handleAddLostFound(state, action.payload, action.todayIso);
+    case 'RESOLVE_LOST_FOUND':
+      return handleResolveLostFound(state, action.payload);
+    case 'UPSERT_GUEST_PROFILE':
+      return handleUpsertGuestProfile(state, action.payload, action.todayIso);
+    case 'ADD_MAIL_INQUIRY':
+      return handleAddMailInquiry(state, action.payload);
+    case 'DISMISS_MAIL_INQUIRY':
+      return handleDismissMailInquiry(state, action.payload);
     case 'ADD_TRANSFER':
       return handleAddTransfer(state, action.payload);
     case 'CYCLE_TRANSFER_STATUS':

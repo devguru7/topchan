@@ -1,4 +1,6 @@
-export type TabId = 'grid' | 'shift' | 'cash' | 'services' | 'settings';
+export type TabId = 'grid' | 'shift' | 'cash' | 'services' | 'guests' | 'settings';
+
+export type AppUserRole = 'admin' | 'manager' | 'housekeeping';
 
 export type RoomStatus = 'available' | 'occupied' | 'dirty' | 'maintenance';
 
@@ -195,6 +197,7 @@ export interface HousekeepingTask {
   roomLabel: string;
   status: 'dirty' | 'maid_done' | 'approved';
   createdAt: string;
+  cleaningStartedAt?: string;
   maidCompletedAt?: string;
   photoAttached?: boolean;
   notes?: string;
@@ -210,6 +213,51 @@ export interface LuggageItem {
   notes: string;
   status: 'stored' | 'released';
   createdAt: string;
+}
+
+export interface LostFoundItem {
+  id: string;
+  propertyId: string;
+  itemName: string;
+  foundLocation: string;
+  guestName?: string;
+  foundDate: string;
+  status: 'stored' | 'returned';
+  notes: string;
+}
+
+export interface ShiftAuditRecord {
+  id: string;
+  propertyId: string;
+  businessDate: string;
+  closedAt: string;
+  actor: string;
+  occupiedUnits: number;
+  totalUnits: number;
+  noShowCancelledCount: number;
+  unregisteredForeigners: number;
+  touristTaxUzs: number;
+  pocketsSnapshot: Array<{
+    id: CashPocketId;
+    name: string;
+    currency: CurrencyCode;
+    balance: number;
+  }>;
+  notes: string;
+}
+
+export interface MailInquiry {
+  id: string;
+  propertyId: string;
+  folder: 'INBOX' | 'Spam';
+  from: string;
+  subject: string;
+  receivedAt: string;
+  category: 'booking' | 'transfer' | 'inquiry';
+  snippet: string;
+  draftReplyRu: string;
+  draftReplyEn: string;
+  handled: boolean;
 }
 
 export interface TransferJob {
@@ -316,6 +364,7 @@ export interface AppState {
   schemaVersion: number;
   revision?: number;
   propertyId: string;
+  operationalDate?: string; // YYYY-MM-DD (Tashkent operational business date)
   adminName: string;
   adminRole?: AdminRole;
   roomCategories: RoomCategory[];
@@ -328,6 +377,9 @@ export interface AppState {
   laundryJobs: LaundryJob[];
   housekeepingTasks: HousekeepingTask[];
   luggageItems: LuggageItem[];
+  lostFoundItems?: LostFoundItem[];
+  shiftHistory?: ShiftAuditRecord[];
+  mailInbox?: MailInquiry[];
   transfers: TransferJob[];
   stockItems: StockItem[];
   emergencyContacts: EmergencyContact[];
@@ -385,4 +437,6 @@ export interface ToastItem {
   title: string;
   description?: string;
   tone: 'emerald' | 'amber' | 'rose' | 'cobalt';
+  actionLabel?: string;
+  onAction?: () => void;
 }

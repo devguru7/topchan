@@ -538,3 +538,248 @@ test('inline SET_ROOM_HOUSEKEEPING_STATUS toggles room & dorm bed cleanliness, s
   assert.equal(state.revision, revBeforeOccupiedBed);
 });
 
+test('STAGE 3 Tape Chart DnD MOVE_OR_RESIZE_SEGMENT: recalculates folio, blocks overlap, and supports 1-click Undo', () => {
+  const BASE_DATE = '2026-11-20';
+  let state = createSeedState(BASE_DATE);
+
+  // Check in a guest to Small-3 for 2 nights ($18/night = $36)
+  state = opsReducer(state, {
+    type: 'CHECK_IN',
+    todayIso: BASE_DATE,
+    payload: {
+      roomId: 'room-small-3',
+      fromDate: BASE_DATE,
+      nights: 2,
+      nightlyRateUsd: 18,
+      source: 'Walk-in',
+      guests: [
+        {
+          fullName: 'Elena Petrova',
+          citizenship: 'UZB',
+          age: 29,
+          passportNo: 'AA1234567',
+          dob: '1997-04-12',
+          sex: 'F',
+          isForeigner: false,
+          emehmonRegistered: true,
+          emehmonCheckedOut: false,
+          registrationSlipPrinted: false,
+          keyIssued: true,
+        },
+      ],
+    },
+  });
+
+  const booking = state.bookings[0];
+  const seg = booking.segments[0];
+  const snapshotBookings = structuredClone(state.bookings);
+  const snapshotRooms = structuredClone(state.physicalRooms);
+
+  // Move to Yellow-4 ($24/night) and resize to 3 nights ($72 total -> +$36 adjustment)
+  state = opsReducer(state, {
+    type: 'MOVE_OR_RESIZE_SEGMENT',
+    todayIso: BASE_DATE,
+    payload: {
+      bookingId: booking.id,
+      segmentId: seg.id,
+      targetRoomId: 'room-yellow-4',
+      newFromDate: BASE_DATE,
+      newToDate: '2026-11-23',
+    },
+  });
+
+  const moved = state.bookings.find((b) => b.id === booking.id)!;
+  assert.equal(moved.segments[0].roomId, 'room-yellow-4');
+  assert.equal(moved.segments[0].nights, 3);
+  assert.equal(calcBookingTotals(moved).totalChargesUsd, 72);
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-small-3')?.status, 'available');
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-yellow-4')?.status, 'occupied');
+
+  // Attempt conflicting move onto already-occupied room-small-1 (yesterday..plus2) -> rejected (revision unchanged)
+  const revBeforeConflict = state.revision;
+  state = opsReducer(state, {
+    type: 'MOVE_OR_RESIZE_SEGMENT',
+    todayIso: BASE_DATE,
+    payload: {
+      bookingId: booking.id,
+      segmentId: seg.id,
+      targetRoomId: 'room-small-1',
+      newFromDate: BASE_DATE,
+      newToDate: '2026-11-23',
+    },
+  });
+  assert.equal(state.revision, revBeforeConflict);
+
+  // 1-click Undo restores exact bookings & rooms state
+  state = opsReducer(state, {
+    type: 'RESTORE_BOOKINGS_AND_ROOMS',
+    payload: {
+      bookings: snapshotBookings,
+      physicalRooms: snapshotRooms,
+      label: 'Отмена переноса Elena Petrova',
+    },
+  });
+  const restored = state.bookings.find((b) => b.id === booking.id)!;
+  assert.equal(restored.segments[0].roomId, 'room-small-3');
+  assert.equal(restored.segments[0].nights, 2);
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-small-3')?.status, 'occupied');
+});
+
+test('STAGE 3 Split-Stay & Female-Only Dorm Guard: creates 2 linked segments and blocks male guests in Fem Dorm', () => {
+  const BASE_DATE = '2026-11-20';
+  let state = createSeedState(BASE_DATE);
+
+  // 1. Male guest MUST be blocked from checking into Fem Dorm (fem-bed-1)
+  const revBeforeMaleFem = state.revision;
+  state = opsReducer(state, {
+    type: 'CHECK_IN',
+    todayIso: BASE_DATE,
+    payload: {
+      roomId: 'room-fem-dorm',
+      bedId: 'fem-bed-1',
+      fromDate: BASE_DATE,
+      nights: 2,
+      nightlyRateUsd: 11,
+      source: 'Walk-in',
+      guests: [
+        {
+          fullName: 'John Smith',
+          citizenship: 'GBR',
+          age: 30,
+          passportNo: 'GB998877',
+          dob: '1996-01-10',
+          sex: 'M',
+          isForeigner: true,
+          emehmonRegistered: false,
+          emehmonCheckedOut: false,
+          registrationSlipPrinted: false,
+          keyIssued: true,
+        },
+      ],
+    },
+  });
+  assert.equal(state.revision, revBeforeMaleFem, 'Male guest must be blocked from Fem Dorm');
+
+  // 2. Check in male guest to Small-3 for 3 nights ($18/night = $54), then Split-Stay on day 2 to Small-4 ($22/night)
+  state = opsReducer(state, {
+    type: 'CHECK_IN',
+    todayIso: BASE_DATE,
+    payload: {
+      roomId: 'room-small-3',
+      fromDate: BASE_DATE,
+      nights: 3,
+      nightlyRateUsd: 18,
+      source: 'Bnovo',
+      guests: [
+        {
+          fullName: 'John Smith',
+          citizenship: 'GBR',
+          age: 30,
+          passportNo: 'GB998877',
+          dob: '1996-01-10',
+          sex: 'M',
+          isForeigner: true,
+          emehmonRegistered: true,
+          emehmonCheckedOut: false,
+          registrationSlipPrinted: false,
+          keyIssued: true,
+        },
+      ],
+    },
+  });
+
+  const booking = state.bookings[0];
+  const origSeg = booking.segments[0];
+
+  // Splitting male guest into Fem Dorm must also be blocked
+  const revBeforeBadSplit = state.revision;
+  state = opsReducer(state, {
+    type: 'SPLIT_STAY_BOOKING',
+    todayIso: BASE_DATE,
+    payload: {
+      bookingId: booking.id,
+      segmentId: origSeg.id,
+      splitDate: '2026-11-21',
+      targetRoomId: 'room-fem-dorm',
+      targetBedId: 'fem-bed-1',
+      targetNightlyRateUsd: 11,
+    },
+  });
+  assert.equal(state.revision, revBeforeBadSplit, 'Split-Stay of male guest into Fem Dorm must be blocked');
+
+  // Valid Split-Stay into Small-4 ($22/night for remaining 2 nights -> 1*18 + 2*22 = $62)
+  state = opsReducer(state, {
+    type: 'SPLIT_STAY_BOOKING',
+    todayIso: BASE_DATE,
+    payload: {
+      bookingId: booking.id,
+      segmentId: origSeg.id,
+      splitDate: '2026-11-21',
+      targetRoomId: 'room-small-4',
+      targetNightlyRateUsd: 22,
+    },
+  });
+
+  const splitBooking = state.bookings.find((b) => b.id === booking.id)!;
+  assert.equal(splitBooking.segments.length, 2);
+  assert.equal(splitBooking.segments[0].roomId, 'room-small-3');
+  assert.equal(splitBooking.segments[0].nights, 1);
+  assert.equal(splitBooking.segments[1].roomId, 'room-small-4');
+  assert.equal(splitBooking.segments[1].nights, 2);
+  assert.equal(calcBookingTotals(splitBooking).totalChargesUsd, 62);
+});
+
+test('STAGE 3 Night Audit COMPLETE_NIGHT_AUDIT: cancels selected no-shows, advances operationalDate, and archives immutable ShiftAuditRecord', () => {
+  const BASE_DATE = '2026-11-20';
+  let state = createSeedState(BASE_DATE);
+
+  // Add a fresh active booking to cancel as No-Show
+  state = opsReducer(state, {
+    type: 'CHECK_IN',
+    todayIso: BASE_DATE,
+    payload: {
+      roomId: 'room-small-3',
+      fromDate: BASE_DATE,
+      nights: 2,
+      nightlyRateUsd: 18,
+      source: 'Bnovo',
+      guests: [
+        {
+          fullName: 'NoShow Guest',
+          citizenship: 'DEU',
+          age: 28,
+          passportNo: 'DE1122334',
+          dob: '1998-03-01',
+          sex: 'M',
+          isForeigner: true,
+          emehmonRegistered: false,
+          emehmonCheckedOut: false,
+          registrationSlipPrinted: false,
+          keyIssued: false,
+        },
+      ],
+    },
+  });
+
+  const noShowBookingId = state.bookings[0].id;
+  const historyLenBefore = (state.shiftHistory ?? []).length;
+
+  state = opsReducer(state, {
+    type: 'COMPLETE_NIGHT_AUDIT',
+    todayIso: BASE_DATE,
+    nowIso: '2026-11-20T23:55:00+05:00',
+    payload: {
+      noShowBookingIds: [noShowBookingId],
+      notes: 'Ночной аудит выполнен без расхождений',
+    },
+  });
+
+  assert.equal(state.operationalDate, '2026-11-21');
+  assert.equal(state.bookings.find((b) => b.id === noShowBookingId)?.status, 'cancelled');
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-small-3')?.status, 'available');
+  assert.equal((state.shiftHistory ?? []).length, historyLenBefore + 1);
+  assert.equal(state.shiftHistory![0].businessDate, BASE_DATE);
+  assert.equal(state.shiftHistory![0].noShowCancelledCount, 1);
+});
+
+

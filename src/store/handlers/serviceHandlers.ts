@@ -1,12 +1,14 @@
-import type { AppState } from '../../types/ops';
+import type { AppState, MailInquiry } from '../../types/ops';
 import { formatUsd } from '../../utils/math';
-import { formatTashkentHm } from '../../utils/time';
+import { formatTashkentHm, getTashkentTodayIso } from '../../utils/time';
 import {
   makeId,
+  type AddLostFoundPayload,
   type AddLuggagePayload,
   type AddTransferPayload,
   type StartLaundryPayload,
   type SubmitGuestQrPayload,
+  type UpsertGuestProfilePayload,
 } from '../types';
 
 export function handleToggleChecklist(
@@ -436,6 +438,169 @@ export function handleResolveTelegramAlert(
     ...state,
     telegramAlerts: state.telegramAlerts.map((a) =>
       a.id === payload.alertId ? { ...a, resolved: true } : a
+    ),
+  };
+}
+
+export function handleStartHousekeepingTask(
+  state: AppState,
+  payload: { taskId: string },
+  nowIso = new Date().toISOString()
+): AppState {
+  return {
+    ...state,
+    housekeepingTasks: state.housekeepingTasks.map((t) =>
+      t.id === payload.taskId
+        ? { ...t, cleaningStartedAt: t.cleaningStartedAt ?? nowIso }
+        : t
+    ),
+  };
+}
+
+export function handleFinishHousekeepingTask(
+  state: AppState,
+  payload: { taskId: string },
+  nowIso = new Date().toISOString()
+): AppState {
+  const task = state.housekeepingTasks.find((t) => t.id === payload.taskId);
+  if (!task) return state;
+
+  const nextRooms = state.physicalRooms.map((r) => {
+    if (r.id !== task.roomId) return r;
+    if (r.beds && task.bedId) {
+      return {
+        ...r,
+        beds: r.beds.map((b) =>
+          b.id === task.bedId ? { ...b, status: 'available' as const } : b
+        ),
+      };
+    }
+    return { ...r, status: 'available' as const };
+  });
+
+  return {
+    ...state,
+    physicalRooms: nextRooms,
+    housekeepingTasks: state.housekeepingTasks.map((t) =>
+      t.id === payload.taskId
+        ? {
+            ...t,
+            status: 'approved' as const,
+            maidCompletedAt: formatTashkentHm(),
+          }
+        : t
+    ),
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Уборка завершена (Чисто)',
+        diff: `${task.roomLabel} → Свободно на Шахматке`,
+        reason: 'Live Housekeeping Board',
+      },
+      ...state.auditLog,
+    ],
+  };
+}
+
+export function handleAddLostFound(
+  state: AppState,
+  params: AddLostFoundPayload,
+  todayIso = getTashkentTodayIso()
+): AppState {
+  return {
+    ...state,
+    lostFoundItems: [
+      {
+        id: makeId('lf'),
+        propertyId: state.propertyId,
+        itemName: params.itemName.trim(),
+        foundLocation: params.foundLocation.trim(),
+        guestName: params.guestName?.trim() || undefined,
+        foundDate: todayIso,
+        status: 'stored',
+        notes: params.notes.trim(),
+      },
+      ...(state.lostFoundItems ?? []),
+    ],
+  };
+}
+
+export function handleResolveLostFound(state: AppState, payload: { id: string }): AppState {
+  return {
+    ...state,
+    lostFoundItems: (state.lostFoundItems ?? []).map((item) =>
+      item.id === payload.id ? { ...item, status: 'returned' as const } : item
+    ),
+  };
+}
+
+export function handleUpsertGuestProfile(
+  state: AppState,
+  params: UpsertGuestProfilePayload,
+  todayIso = getTashkentTodayIso()
+): AppState {
+  const passportClean = params.passportNo.trim().toUpperCase();
+  const idx = state.guestProfiles.findIndex(
+    (p) => p.passportNo.toUpperCase() === passportClean
+  );
+  if (idx >= 0) {
+    const next = [...state.guestProfiles];
+    next[idx] = {
+      ...next[idx],
+      fullName: params.fullName.trim() || next[idx].fullName,
+      citizenship: params.citizenship.trim().toUpperCase() || next[idx].citizenship,
+      phone: params.phone?.trim() || next[idx].phone,
+      tag: params.tag,
+      notes: params.notes.trim(),
+    };
+    return { ...state, guestProfiles: next };
+  }
+  return {
+    ...state,
+    guestProfiles: [
+      {
+        id: makeId('prof'),
+        propertyId: state.propertyId,
+        fullName: params.fullName.trim(),
+        passportNo: passportClean,
+        citizenship: params.citizenship.trim().toUpperCase() || 'UZB',
+        phone: params.phone?.trim() || undefined,
+        visitsCount: 1,
+        tag: params.tag,
+        notes: params.notes.trim(),
+        lastVisitDate: todayIso,
+      },
+      ...state.guestProfiles,
+    ],
+  };
+}
+
+export function handleAddMailInquiry(
+  state: AppState,
+  payload: Omit<MailInquiry, 'id' | 'propertyId' | 'handled'>
+): AppState {
+  return {
+    ...state,
+    mailInbox: [
+      {
+        id: makeId('mail'),
+        propertyId: state.propertyId,
+        handled: false,
+        ...payload,
+      },
+      ...(state.mailInbox ?? []),
+    ],
+  };
+}
+
+export function handleDismissMailInquiry(state: AppState, payload: { id: string }): AppState {
+  return {
+    ...state,
+    mailInbox: (state.mailInbox ?? []).map((m) =>
+      m.id === payload.id ? { ...m, handled: true } : m
     ),
   };
 }

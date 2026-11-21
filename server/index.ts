@@ -10,7 +10,20 @@ import {
   isGeminiConfigured,
   parseCommandWithGemini,
 } from './gemini.ts';
-import { startTelegramScheduler } from './telegramBot.ts';
+import {
+  getMailInboxSnapshot,
+  isMailWatcherConfigured,
+  pollYandexImapOnce,
+  startMailWatcher,
+} from './mailWatcher.ts';
+import {
+  getTelegramAuditLog,
+  handleTelegramWebhookUpdate,
+  isTelegramConfigured,
+  sendTelegramMessage,
+  startTelegramScheduler,
+  updateLiveOpsSnapshot,
+} from './telegramBot.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -98,7 +111,7 @@ function createRateLimiter(maxRequests: number, windowMs: number) {
 }
 
 // Bearer Auth guard for protected /api/* routes
-const PUBLIC_API_PATHS = new Set(['/api/health', '/api/rates/cbu']);
+const PUBLIC_API_PATHS = new Set(['/api/health', '/api/rates/cbu', '/api/telegram/webhook']);
 
 function apiAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   if (req.method === 'OPTIONS' || PUBLIC_API_PATHS.has(req.path)) {
@@ -252,6 +265,8 @@ async function startServer() {
       timezone: 'Asia/Tashkent',
       geminiConfigured: isGeminiConfigured(),
       bnovoConfigured: isBnovoConfigured(),
+      telegramConfigured: isTelegramConfigured(),
+      mailWatcherConfigured: isMailWatcherConfigured(),
       authProtected: Boolean(process.env.API_AUTH_TOKEN?.trim()),
       timestamp: new Date().toISOString(),
     });
@@ -368,8 +383,53 @@ async function startServer() {
     return res.json(result);
   });
 
-  // Start background Tashkent Telegram reminders
+  // 7. Yandex Mail IMAP Inbox & Manual Poll
+  app.get('/api/mail/inbox', (_req, res) => {
+    const snap = getMailInboxSnapshot();
+    return res.json({ ok: true, ...snap });
+  });
+
+  app.post('/api/mail/sync', async (_req, res) => {
+    const result = await pollYandexImapOnce((inquiry) => {
+      if (isTelegramConfigured()) {
+        void sendTelegramMessage(
+          `📧 Новое письмо (${inquiry.folder}) · ${inquiry.category}\nОт: ${inquiry.from}\nТема: ${inquiry.subject}`
+        );
+      }
+    });
+    return res.json(result);
+  });
+
+  // 8. Telegram Two-Way Snapshot Push & Webhook Callback Handler
+  app.post('/api/telegram/snapshot', (req, res) => {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ ok: false, error: 'Некорректный снимок состояния.' });
+    }
+    const updated = updateLiveOpsSnapshot(req.body);
+    return res.json({ ok: true, updatedAt: updated.updatedAt, auditCount: getTelegramAuditLog().length });
+  });
+
+  app.post('/api/telegram/webhook', async (req, res) => {
+    const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+    if (expectedSecret) {
+      const providedSecret = String(req.headers['x-telegram-bot-api-secret-token'] ?? '');
+      if (!providedSecret || !constantTimeTokenMatch(providedSecret, expectedSecret)) {
+        return res.status(403).json({ ok: false, error: 'Invalid Telegram webhook secret.' });
+      }
+    }
+    const outcome = await handleTelegramWebhookUpdate(req.body ?? {});
+    return res.status(outcome.reason === 'unauthorized' ? 403 : 200).json(outcome);
+  });
+
+  // Start background Tashkent Telegram reminders & Yandex Mail IMAP watcher
   startTelegramScheduler();
+  startMailWatcher((inquiry) => {
+    if (isTelegramConfigured()) {
+      void sendTelegramMessage(
+        `📧 [${inquiry.folder}] Новое обращение (${inquiry.category})\nОт: ${inquiry.from}\nТема: ${inquiry.subject}`
+      );
+    }
+  });
 
   // Mount Vite dev middleware in development or serve built static files in production
   if (!IS_PROD) {

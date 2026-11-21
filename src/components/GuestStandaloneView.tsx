@@ -8,12 +8,12 @@ import {
   KeyRound,
   Plane,
   Shirt,
-  Sparkles,
   Wifi,
 } from 'lucide-react';
 import type { GuestLang } from '../types/ops';
 import { useOpsData, useUI } from '../context/OpsContext';
 import { ToastStack } from './ToastStack';
+import { TopchanMark } from './ui';
 
 const COPY: Record<
   GuestLang,
@@ -225,10 +225,8 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       <div className="mx-auto max-w-md px-4 pb-10 pt-5">
         {/* Top bar: Brand + Language Switcher */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--tone-emerald-bg)] text-[var(--tone-emerald-fg)]">
-              <Sparkles className="h-4 w-4" strokeWidth={1.75} />
-            </div>
+          <div className="flex items-center gap-2.5">
+            <TopchanMark size={32} className="shrink-0" />
             <div>
               <p className="text-sm font-bold text-[var(--text-primary)]">{state.integrations.propertyName}</p>
               <p className="text-xs text-[var(--text-muted)]">{roomLabel}</p>

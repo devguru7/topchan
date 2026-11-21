@@ -3,6 +3,7 @@ import {
   Archive,
   BedDouble,
   Bot,
+  Check,
   Chrome,
   Coins,
   Database,
@@ -10,11 +11,13 @@ import {
   FileSpreadsheet,
   History,
   Loader2,
+  Mail,
+  MessageSquareText,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Shield,
-  Sparkles,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
 import type { SettingsSubTab } from '../../context/UIContext';
@@ -55,6 +58,8 @@ export const SettingsTab: React.FC = () => {
     updateCategoryPrice,
     updateCurrencySettings,
     updateIntegrationSettings,
+    dismissMailInquiry,
+    syncMailInbox,
     setSidePanelOpen,
     resetDemoData,
     pushToast,
@@ -99,8 +104,10 @@ export const SettingsTab: React.FC = () => {
   const [showResolvedAlerts, setShowResolvedAlerts] = useState(false);
   const [draftLangByAlert, setDraftLangByAlert] = useState<Record<string, GuestLang>>({});
   const [draftingAlertId, setDraftingAlertId] = useState<string | null>(null);
+  const [syncingMail, setSyncingMail] = useState(false);
 
   const unresolvedAlertsCount = state.telegramAlerts.filter((a) => !a.resolved).length;
+  const activeMailItems = (state.mailInbox ?? []).filter((m) => !m.handled);
   const visibleAlerts = showResolvedAlerts
     ? state.telegramAlerts
     : state.telegramAlerts.filter((a) => !a.resolved);
@@ -136,7 +143,7 @@ export const SettingsTab: React.FC = () => {
       updateTelegramAlertDraft(alertId, res.reply);
       pushToast(
         'Черновик ответа готов',
-        `Язык ${lang.toUpperCase()} · ${res.engine === 'gemini' ? 'Gemini AI' : 'Локальный движок'}`,
+        `Язык ${lang.toUpperCase()} · ${res.engine === 'gemini' ? 'Адаптивный шаблон' : 'Стандарт Topchan'}`,
         'cobalt'
       );
     } finally {
@@ -388,10 +395,10 @@ export const SettingsTab: React.FC = () => {
                                 style={{ color: 'var(--tone-cobalt-fg)' }}
                               />
                             ) : (
-                              <Sparkles
+                              <MessageSquareText
                                 className="w-3.5 h-3.5"
                                 strokeWidth={1.75}
-                                style={{ color: 'var(--tone-cobalt-fg)' }}
+                                style={{ color: 'var(--brand-primary)' }}
                               />
                             )}
                             Черновик ответа гостю
@@ -452,6 +459,121 @@ export const SettingsTab: React.FC = () => {
                 );
               })
             )}
+          </div>
+
+          {/* Yandex Mail IMAP Controller (INBOX + Spam) */}
+          <div className="border-t border-[var(--border-strong)]">
+            <div className="px-5 py-3.5 bg-[var(--bg-elevated)] border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor: 'var(--brand-primary-soft)',
+                    color: 'var(--brand-primary)',
+                  }}
+                >
+                  <Mail className="w-4 h-4" strokeWidth={1.75} />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    Яндекс Почта (INBOX + Спам)
+                  </div>
+                  <div className="text-xs text-[var(--text-muted)] font-mono">
+                    {state.integrations.yandexEmail} · неразобранных: {activeMailItems.length}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={syncingMail}
+                onClick={async () => {
+                  setSyncingMail(true);
+                  try {
+                    await syncMailInbox();
+                  } finally {
+                    setSyncingMail(false);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${syncingMail ? 'animate-spin' : ''}`}
+                  strokeWidth={1.75}
+                />
+                Проверить почту
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              {activeMailItems.length === 0 ? (
+                <EmptyState
+                  icon={Mail}
+                  title="Новых писем от гостей нет"
+                  description="IMAP-контроллер отслеживает INBOX и папку Спам на предмет заявок на бронь и трансфер."
+                />
+              ) : (
+                activeMailItems.map((mail) => (
+                  <div
+                    key={mail.id}
+                    className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                          <StatusPill tone={mail.folder === 'Spam' ? 'rose' : 'cobalt'}>
+                            {mail.folder === 'Spam' ? 'Спам (выловлено!)' : 'INBOX'}
+                          </StatusPill>
+                          <StatusPill tone="amber">{mail.category}</StatusPill>
+                          <span className="font-mono text-[var(--text-muted)]">
+                            {mail.receivedAt.slice(0, 16).replace('T', ' ')}
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-1.5">
+                          {mail.subject}
+                        </h3>
+                        <div className="text-xs text-[var(--text-muted)] font-mono">
+                          От: {mail.from}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => dismissMailInquiry(mail.id)}
+                        className="px-3 py-1.5 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors"
+                      >
+                        <Check className="w-3.5 h-3.5" strokeWidth={2} />
+                        Обработано
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      {mail.snippet}
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--border-subtle)]">
+                      <CopyButton
+                        text={mail.draftReplyRu}
+                        label="Скопировать ответ (RU)"
+                        size="sm"
+                        variant="ghost"
+                        onCopied={() =>
+                          pushToast('Ответ (RU) скопирован', mail.from, 'emerald')
+                        }
+                      />
+                      <CopyButton
+                        text={mail.draftReplyEn}
+                        label="Copy reply (EN)"
+                        size="sm"
+                        variant="ghost"
+                        onCopied={() =>
+                          pushToast('Reply (EN) copied', mail.from, 'emerald')
+                        }
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </section>
       )}

@@ -4,12 +4,17 @@ import {
   ArrowRight,
   Banknote,
   BedDouble,
+  Briefcase,
   Command,
+  FileText,
   Mic,
   MicOff,
+  Moon,
   Search,
-  Sparkles,
+  Sun,
+  Terminal,
   UserPlus,
+  Users,
   WashingMachine,
   X,
 } from 'lucide-react';
@@ -21,10 +26,15 @@ import { useVoiceDictation } from '../hooks/useVoiceDictation';
 export const CommandPalette: React.FC = () => {
   const {
     state,
+    theme,
+    toggleTheme,
     commandPaletteOpen,
     setCommandPaletteOpen,
     setActiveTab,
+    setServicesSubTab,
+    setNightAuditOpen,
     openCheckInModal,
+    openWelcomeCardModal,
     setSelectedBookingId,
     commitParsedCommand,
     pushToast,
@@ -76,6 +86,19 @@ export const CommandPalette: React.FC = () => {
       .slice(0, 4);
   }, [query, state.bookings, state.physicalRooms]);
 
+  const matchingLuggage = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return state.luggageItems
+      .filter(
+        (item) =>
+          item.tagCode.toLowerCase().includes(q) ||
+          item.guestName.toLowerCase().includes(q) ||
+          item.notes.toLowerCase().includes(q)
+      )
+      .slice(0, 3);
+  }, [query, state.luggageItems]);
+
   const handleCommit = () => {
     if (!parsed) return;
     const ok = commitParsedCommand(parsed);
@@ -90,18 +113,19 @@ export const CommandPalette: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           style={{ backgroundColor: 'var(--backdrop-scrim)' }}
-          className="fixed inset-0 z-50 backdrop-blur-xs flex items-start justify-center p-4 pt-[10vh] no-print"
+          className="fixed inset-0 z-50 backdrop-blur-[3px] flex items-start justify-center p-4 pt-[10vh] no-print"
           onClick={() => setCommandPaletteOpen(false)}
         >
           <motion.div
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Палитра команд Topchan Ops"
-            className="w-full max-w-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-2xl shadow-xl overflow-hidden"
+            style={{ boxShadow: 'var(--shadow-popover)' }}
+            className="w-full max-w-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-2xl overflow-hidden"
           >
             <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--border-subtle)]">
               <Search className="w-4 h-4 text-[var(--text-muted)] shrink-0" strokeWidth={1.75} />
@@ -187,7 +211,7 @@ export const CommandPalette: React.FC = () => {
                       className="flex items-center gap-2 text-xs font-semibold"
                       style={{ color: 'var(--tone-cobalt-fg)' }}
                     >
-                      <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      <Terminal className="w-3.5 h-3.5" strokeWidth={1.75} />
                       <span>Автопилот готов провести операцию</span>
                     </div>
                     <span className="text-xs text-[var(--text-muted)] tabular-nums">
@@ -249,7 +273,7 @@ export const CommandPalette: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleCommit}
-                    className="w-full py-2.5 px-4 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="ops-brand-btn w-full py-2.5 px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
                   >
                     Подтвердить и провести в 1 клик
                     <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
@@ -296,17 +320,32 @@ export const CommandPalette: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab('grid');
+                    setCommandPaletteOpen(false);
+                    setNightAuditOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
+                >
+                  <Moon
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--brand-primary)' }}
+                  />
+                  <span className="truncate">Ночной аудит</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('guests');
                     setCommandPaletteOpen(false);
                   }}
                   className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
                 >
-                  <BedDouble
+                  <Users
                     className="w-3.5 h-3.5 shrink-0"
                     strokeWidth={1.75}
                     style={{ color: 'var(--tone-cobalt-fg)' }}
                   />
-                  <span className="truncate">Шахматка</span>
+                  <span className="truncate">Гости и CRM</span>
                 </button>
                 <button
                   type="button"
@@ -326,6 +365,38 @@ export const CommandPalette: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    setActiveTab('grid');
+                    setCommandPaletteOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
+                >
+                  <BedDouble
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-cobalt-fg)' }}
+                  />
+                  <span className="truncate">Шахматка</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServicesSubTab('luggage_transfers');
+                    setActiveTab('services');
+                    setCommandPaletteOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
+                >
+                  <Briefcase
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-amber-fg)' }}
+                  />
+                  <span className="truncate">Багаж и находки</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServicesSubTab('laundry_hk');
                     setActiveTab('services');
                     setCommandPaletteOpen(false);
                   }}
@@ -336,15 +407,80 @@ export const CommandPalette: React.FC = () => {
                     strokeWidth={1.75}
                     style={{ color: 'var(--tone-cobalt-fg)' }}
                   />
-                  <span className="truncate">Стирка и QR</span>
+                  <span className="truncate">Стирка и уборка</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    toggleTheme();
+                    setCommandPaletteOpen(false);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
+                >
+                  {theme === 'dark' ? (
+                    <Sun
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-amber-fg)' }}
+                    />
+                  ) : (
+                    <Moon
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-cobalt-fg)' }}
+                    />
+                  )}
+                  <span className="truncate">
+                    {theme === 'dark' ? 'Дневной режим' : 'Ночной режим'}
+                  </span>
                 </button>
               </div>
+
+              {/* Matching Luggage Tags */}
+              {matchingLuggage.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-[var(--text-muted)]">
+                    Камера хранения багажа
+                  </div>
+                  <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-xl overflow-hidden bg-[var(--bg-elevated)]">
+                    {matchingLuggage.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setServicesSubTab('luggage_transfers');
+                          setActiveTab('services');
+                          setCommandPaletteOpen(false);
+                        }}
+                        className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[var(--bg-hover)] transition-colors text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-[var(--text-primary)] truncate">
+                            <span className="font-mono text-[var(--brand-primary)] mr-1.5">
+                              {item.tagCode}
+                            </span>
+                            {item.guestName}
+                          </div>
+                          <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums">
+                            {item.bagsCount} мест · рейс {item.flightTime} ·{' '}
+                            {item.status === 'stored' ? 'на хранении' : 'выдан'}
+                          </div>
+                        </div>
+                        <ArrowRight
+                          className="w-4 h-4 text-[var(--text-muted)] shrink-0"
+                          strokeWidth={1.75}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Active guests */}
               {matchingBookings.length > 0 && (
                 <div className="space-y-1.5">
                   <div className="text-xs font-medium text-[var(--text-muted)]">
-                    Открыть счёт гостя
+                    Открыть счёт или Welcome-карту гостя
                   </div>
                   <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-xl overflow-hidden bg-[var(--bg-elevated)]">
                     {matchingBookings.map((b) => {
@@ -352,29 +488,53 @@ export const CommandPalette: React.FC = () => {
                         (r) => r.id === b.segments[b.segments.length - 1]?.roomId
                       );
                       return (
-                        <button
+                        <div
                           key={b.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab('grid');
-                            setSelectedBookingId(b.id);
-                            setCommandPaletteOpen(false);
-                          }}
-                          className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[var(--bg-hover)] transition-colors text-left"
+                          className="px-3.5 py-2.5 flex items-center justify-between gap-2 hover:bg-[var(--bg-hover)] transition-colors"
                         >
-                          <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab('grid');
+                              setSelectedBookingId(b.id);
+                              setCommandPaletteOpen(false);
+                            }}
+                            className="flex-1 min-w-0 text-left"
+                          >
                             <div className="text-sm font-medium text-[var(--text-primary)] truncate">
                               {b.guests.map((g) => g.fullName).join(', ')}
                             </div>
                             <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums">
                               {room?.code} · {b.bnovoId}
                             </div>
+                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              title="Открыть Welcome-карту гостя"
+                              onClick={() => {
+                                setCommandPaletteOpen(false);
+                                openWelcomeCardModal(b.id);
+                              }}
+                              className="px-2 py-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1"
+                            >
+                              <FileText className="w-3 h-3 text-[var(--brand-primary)]" strokeWidth={1.75} />
+                              Welcome
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Открыть счёт гостя"
+                              onClick={() => {
+                                setActiveTab('grid');
+                                setSelectedBookingId(b.id);
+                                setCommandPaletteOpen(false);
+                              }}
+                              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                            >
+                              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                            </button>
                           </div>
-                          <ArrowRight
-                            className="w-4 h-4 text-[var(--text-muted)] shrink-0"
-                            strokeWidth={1.75}
-                          />
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -385,7 +545,7 @@ export const CommandPalette: React.FC = () => {
             <div className="px-4 py-2.5 bg-[var(--bg-elevated)] border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-muted)]">
               <div className="flex items-center gap-1.5">
                 <Command className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>⌘K / Ctrl+K — быстрый вызов · 1–5 разделы · N заезд</span>
+                <span>⌘K / Ctrl+K — быстрый вызов · 1–6 разделы · N заезд</span>
               </div>
               <span>Esc — закрыть</span>
             </div>

@@ -6,17 +6,36 @@ import type {
   LedgerEntry,
   ParsedCommand,
 } from '../../types/ops';
-import { calcBookingTotals, formatUsd, formatUzs, round2 } from '../../utils/math';
-import { addDaysIso, formatTashkentHm, getTashkentTodayIso } from '../../utils/time';
+import { calcBookingTotals, calcMonthlyTouristTaxUzs, formatUsd, formatUzs, round2 } from '../../utils/math';
+import { addDaysIso, diffDaysIso, formatTashkentHm, getTashkentTodayIso } from '../../utils/time';
 import { findRoomConflicts } from '../../utils/availability';
 import {
   makeId,
   type AddPaymentPayload,
   type CheckInPayload,
   type CheckOutPayload,
+  type CompleteNightAuditPayload,
   type ExtendOrMovePayload,
   type IssueRefundPayload,
+  type MoveOrResizeSegmentPayload,
+  type SplitStayPayload,
 } from '../types';
+
+export function validateFemaleOnlyRoom(
+  state: AppState,
+  roomId: string,
+  guests: Array<{ fullName: string; sex?: 'M' | 'F' }>
+): string | null {
+  const room = state.physicalRooms.find((r) => r.id === roomId);
+  if (!room) return null;
+  const cat = state.roomCategories.find((c) => c.id === room.categoryId);
+  if (!cat?.femaleOnly) return null;
+  const maleGuest = guests.find((g) => g.sex === 'M');
+  if (maleGuest) {
+    return `Женский дорм (${room.code}) предназначен только для женщин — гость ${maleGuest.fullName} (M) не может быть размещён сюда.`;
+  }
+  return null;
+}
 
 export function isPocketCurrencyMatch(pocketId: CashPocketId, currency: CurrencyCode): boolean {
   if (pocketId === 'safe') return false;
@@ -101,6 +120,11 @@ export function handleCheckIn(
   const fromDate = payload.fromDate || todayIso;
   const nights = Math.max(1, Math.round(payload.nights));
   const toDate = addDaysIso(fromDate, nights);
+
+  // Female-only dorm guard (Fem Dorm: Fem-1..4)
+  if (validateFemaleOnlyRoom(state, payload.roomId, payload.guests)) {
+    return state;
+  }
 
   // Overbooking guard: block conflicting stays on the same room/bed
   const conflicts = findRoomConflicts(
@@ -1145,5 +1169,378 @@ export function handleMarkEmehmonRegistered(
           }
         : b
     ),
+  };
+}
+
+function syncRoomStatusesForToday(
+  rooms: AppState['physicalRooms'],
+  bookings: AppState['bookings'],
+  todayIso: string
+): AppState['physicalRooms'] {
+  const occupiedKeys = new Set<string>();
+  for (const b of bookings) {
+    if (b.status !== 'active') continue;
+    for (const seg of b.segments) {
+      if (seg.fromDate <= todayIso && seg.toDate > todayIso) {
+        occupiedKeys.add(`${seg.roomId}:${seg.bedId ?? ''}`);
+      }
+    }
+  }
+  return rooms.map((r) => {
+    if (r.beds) {
+      return {
+        ...r,
+        beds: r.beds.map((bed) => {
+          const isOcc = occupiedKeys.has(`${r.id}:${bed.id}`);
+          if (isOcc) return { ...bed, status: 'occupied' as const };
+          if (bed.status === 'occupied') return { ...bed, status: 'available' as const };
+          return bed;
+        }),
+      };
+    }
+    const isOcc = occupiedKeys.has(`${r.id}:`);
+    if (isOcc) return { ...r, status: 'occupied' as const };
+    if (r.status === 'occupied') return { ...r, status: 'available' as const };
+    return r;
+  });
+}
+
+export function validateMoveOrResizeSegment(
+  state: AppState,
+  payload: MoveOrResizeSegmentPayload
+): string | null {
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId);
+  if (!bkg || bkg.status !== 'active') return 'Бронь не найдена или уже закрыта.';
+  const seg = bkg.segments.find((s) => s.id === payload.segmentId);
+  if (!seg) return 'Сегмент проживания не найден.';
+  const nights = diffDaysIso(payload.newFromDate, payload.newToDate);
+  if (nights < 1) return 'Минимальная длительность проживания — 1 ночь.';
+
+  const femaleErr = validateFemaleOnlyRoom(state, payload.targetRoomId, bkg.guests);
+  if (femaleErr) return femaleErr;
+
+  const conflicts = findRoomConflicts(
+    state.bookings,
+    payload.targetRoomId,
+    payload.targetBedId,
+    payload.newFromDate,
+    payload.newToDate,
+    payload.bookingId
+  );
+  if (conflicts.length > 0) {
+    return `Конфликт дат с ${conflicts[0].guestName} (${conflicts[0].fromDate} — ${conflicts[0].toDate}).`;
+  }
+  return null;
+}
+
+export function handleMoveOrResizeSegment(
+  state: AppState,
+  payload: MoveOrResizeSegmentPayload,
+  nowIso = new Date().toISOString(),
+  todayIso = getTashkentTodayIso()
+): AppState {
+  if (validateMoveOrResizeSegment(state, payload)) return state;
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId)!;
+  const oldSeg = bkg.segments.find((s) => s.id === payload.segmentId)!;
+
+  const newNights = diffDaysIso(payload.newFromDate, payload.newToDate);
+  const targetRoom = state.physicalRooms.find((r) => r.id === payload.targetRoomId);
+  if (!targetRoom) return state;
+  const targetCat = state.roomCategories.find((c) => c.id === targetRoom.categoryId);
+  const occKey = Math.min(Math.max(1, bkg.guests.length), targetCat?.maxOccupancy ?? 1);
+  const roomChanged =
+    payload.targetRoomId !== oldSeg.roomId || (payload.targetBedId ?? '') !== (oldSeg.bedId ?? '');
+  const nextRate = roomChanged
+    ? (targetCat?.pricesUsd[occKey] ?? targetCat?.pricesUsd[1] ?? oldSeg.nightlyRateUsd)
+    : oldSeg.nightlyRateUsd;
+
+  const oldTotal = round2(oldSeg.nights * oldSeg.nightlyRateUsd);
+  const newTotal = round2(newNights * nextRate);
+  const deltaUsd = round2(newTotal - oldTotal);
+
+  const targetBed = targetRoom.beds?.find((b) => b.id === payload.targetBedId);
+  const targetLabel = targetBed ? `${targetRoom.code} ${targetBed.label}` : targetRoom.code;
+
+  const nextBookings = state.bookings.map((b) => {
+    if (b.id !== payload.bookingId) return b;
+    const nextSegments = b.segments.map((s) =>
+      s.id === payload.segmentId
+        ? {
+            ...s,
+            roomId: payload.targetRoomId,
+            bedId: payload.targetBedId,
+            fromDate: payload.newFromDate,
+            toDate: payload.newToDate,
+            nights: newNights,
+            nightlyRateUsd: nextRate,
+          }
+        : s
+    );
+    const lastSeg = nextSegments[nextSegments.length - 1];
+    const nextLedger =
+      deltaUsd !== 0
+        ? [
+            ...b.ledgerEntries,
+            {
+              id: makeId('led'),
+              timestamp: nowIso,
+              type: 'charge' as const,
+              category: 'accommodation' as const,
+              label: `Перерасчёт шахматки · ${targetLabel} (${payload.newFromDate.slice(5)}→${payload.newToDate.slice(5)}, ${newNights} н.)`,
+              amountUsd: deltaUsd,
+              actor: state.adminName,
+            },
+          ]
+        : b.ledgerEntries;
+    return {
+      ...b,
+      checkingOutToday: lastSeg?.toDate === todayIso,
+      segments: nextSegments,
+      ledgerEntries: nextLedger,
+    };
+  });
+
+  const nextRooms = syncRoomStatusesForToday(state.physicalRooms, nextBookings, todayIso);
+
+  return {
+    ...state,
+    physicalRooms: nextRooms,
+    bookings: nextBookings,
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Перенос / изменение на Шахматке',
+        diff: `${targetLabel} · ${payload.newFromDate} → ${payload.newToDate} (${newNights} н.${deltaUsd !== 0 ? `, ${deltaUsd > 0 ? '+' : ''}${formatUsd(deltaUsd)}` : ''})`,
+        reason: 'Drag-and-Drop / Resize на шахматке',
+      },
+      ...state.auditLog,
+    ],
+  };
+}
+
+export function handleRestoreBookingsAndRooms(
+  state: AppState,
+  payload: { bookings: BookingGroup[]; physicalRooms: AppState['physicalRooms']; label: string },
+  nowIso = new Date().toISOString()
+): AppState {
+  return {
+    ...state,
+    bookings: payload.bookings,
+    physicalRooms: payload.physicalRooms,
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Отмена действия (Undo)',
+        diff: payload.label,
+        reason: 'Восстановление состояния шахматки в 1 клик',
+      },
+      ...state.auditLog,
+    ],
+  };
+}
+
+export function validateSplitStay(state: AppState, payload: SplitStayPayload): string | null {
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId);
+  if (!bkg || bkg.status !== 'active') return 'Бронь не найдена или уже закрыта.';
+  const seg = bkg.segments.find((s) => s.id === payload.segmentId);
+  if (!seg) return 'Сегмент не найден.';
+  if (payload.splitDate <= seg.fromDate || payload.splitDate >= seg.toDate) {
+    return 'Дата переселения должна быть строго между датой заезда и датой выезда.';
+  }
+  const femaleErr = validateFemaleOnlyRoom(state, payload.targetRoomId, bkg.guests);
+  if (femaleErr) return femaleErr;
+
+  const conflicts = findRoomConflicts(
+    state.bookings,
+    payload.targetRoomId,
+    payload.targetBedId,
+    payload.splitDate,
+    seg.toDate,
+    payload.bookingId
+  );
+  if (conflicts.length > 0) {
+    return `Новый номер занят с ${payload.splitDate} (${conflicts[0].guestName}).`;
+  }
+  return null;
+}
+
+export function handleSplitStayBooking(
+  state: AppState,
+  payload: SplitStayPayload,
+  nowIso = new Date().toISOString(),
+  todayIso = getTashkentTodayIso()
+): AppState {
+  if (validateSplitStay(state, payload)) return state;
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId)!;
+  const seg = bkg.segments.find((s) => s.id === payload.segmentId)!;
+
+  const firstNights = diffDaysIso(seg.fromDate, payload.splitDate);
+  const secondNights = diffDaysIso(payload.splitDate, seg.toDate);
+  const oldTotal = round2(seg.nights * seg.nightlyRateUsd);
+  const newTotal = round2(firstNights * seg.nightlyRateUsd + secondNights * payload.targetNightlyRateUsd);
+  const deltaUsd = round2(newTotal - oldTotal);
+
+  const targetRoom = state.physicalRooms.find((r) => r.id === payload.targetRoomId);
+  const targetBed = targetRoom?.beds?.find((b) => b.id === payload.targetBedId);
+  const targetLabel = targetRoom
+    ? targetBed
+      ? `${targetRoom.code} ${targetBed.label}`
+      : targetRoom.code
+    : 'Номер';
+
+  const nextBookings = state.bookings.map((b) => {
+    if (b.id !== payload.bookingId) return b;
+    const nextSegments = b.segments.flatMap((s) => {
+      if (s.id !== payload.segmentId) return [s];
+      return [
+        {
+          ...s,
+          toDate: payload.splitDate,
+          nights: firstNights,
+        },
+        {
+          id: makeId('seg'),
+          roomId: payload.targetRoomId,
+          bedId: payload.targetBedId,
+          fromDate: payload.splitDate,
+          toDate: s.toDate,
+          nights: secondNights,
+          nightlyRateUsd: payload.targetNightlyRateUsd,
+        },
+      ];
+    });
+    const nextLedger =
+      deltaUsd !== 0
+        ? [
+            ...b.ledgerEntries,
+            {
+              id: makeId('led'),
+              timestamp: nowIso,
+              type: 'charge' as const,
+              category: 'accommodation' as const,
+              label: `Split-Stay с ${payload.splitDate.slice(5)} → ${targetLabel} (разница тарифа)`,
+              amountUsd: deltaUsd,
+              actor: state.adminName,
+            },
+          ]
+        : b.ledgerEntries;
+    return {
+      ...b,
+      segments: nextSegments,
+      ledgerEntries: nextLedger,
+    };
+  });
+
+  const nextRooms = syncRoomStatusesForToday(state.physicalRooms, nextBookings, todayIso);
+
+  return {
+    ...state,
+    physicalRooms: nextRooms,
+    bookings: nextBookings,
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Split-Stay переселение',
+        diff: `С ${payload.splitDate} → ${targetLabel} (${secondNights} н., общий баланс сохранён)`,
+        reason: 'Разделение брони на 2 связанных сегмента',
+      },
+      ...state.auditLog,
+    ],
+  };
+}
+
+export function handleCompleteNightAudit(
+  state: AppState,
+  payload: CompleteNightAuditPayload,
+  nowIso = new Date().toISOString(),
+  todayIso = getTashkentTodayIso()
+): AppState {
+  const businessDate = state.operationalDate ?? todayIso;
+  const nextBusinessDate = addDaysIso(businessDate, 1);
+  const noShowSet = new Set(payload.noShowBookingIds);
+
+  const nextBookings = state.bookings.map((b) => {
+    if (noShowSet.has(b.id) && b.status === 'active') {
+      return { ...b, status: 'cancelled' as const, checkingOutToday: false };
+    }
+    if (b.status === 'active') {
+      const lastSeg = b.segments[b.segments.length - 1];
+      return {
+        ...b,
+        checkingOutToday: lastSeg?.toDate === nextBusinessDate,
+      };
+    }
+    return b;
+  });
+
+  const nextRooms = syncRoomStatusesForToday(state.physicalRooms, nextBookings, nextBusinessDate);
+  const activePhysicalCount = state.physicalRooms.filter((r) => !r.archived).length;
+  const totalUnits = state.physicalRooms
+    .filter((r) => !r.archived)
+    .reduce((sum, r) => sum + (r.beds ? r.beds.length : 1), 0);
+  const occupiedUnits = nextRooms
+    .filter((r) => !r.archived)
+    .reduce(
+      (sum, r) =>
+        sum + (r.beds ? r.beds.filter((b) => b.status === 'occupied').length : r.status === 'occupied' ? 1 : 0),
+      0
+    );
+  const unregisteredForeigners = nextBookings
+    .filter((b) => b.status === 'active')
+    .reduce((sum, b) => sum + b.guests.filter((g) => g.isForeigner && !g.emehmonRegistered).length, 0);
+  const touristTaxUzs = calcMonthlyTouristTaxUzs(nextBookings, state.currency.bcvUzs, activePhysicalCount);
+
+  const auditRecord = {
+    id: makeId('shift'),
+    propertyId: state.propertyId,
+    businessDate,
+    closedAt: nowIso,
+    actor: state.adminName,
+    occupiedUnits,
+    totalUnits,
+    noShowCancelledCount: noShowSet.size,
+    unregisteredForeigners,
+    touristTaxUzs,
+    pocketsSnapshot: state.pockets.map((p) => ({
+      id: p.id,
+      name: p.name,
+      currency: p.currency,
+      balance: p.balance,
+    })),
+    notes: payload.notes.trim() || 'Ночной аудит выполнен без замечаний.',
+  };
+
+  return {
+    ...state,
+    operationalDate: nextBusinessDate,
+    physicalRooms: nextRooms,
+    bookings: nextBookings,
+    shiftHistory: [auditRecord, ...(state.shiftHistory ?? [])],
+    shiftChecklist: state.shiftChecklist.map((item) => ({
+      ...item,
+      done: false,
+      doneAt: undefined,
+    })),
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Ночной аудит (Закрытие суток)',
+        diff: `Сутки ${businessDate} закрыты → новая дата ${nextBusinessDate} · No-show: ${noShowSet.size}`,
+        reason: auditRecord.notes,
+      },
+      ...state.auditLog,
+    ],
   };
 }

@@ -5,9 +5,12 @@ import type {
   CashPocketId,
   CurrencyCode,
   CurrencySettings,
+  GuestTag,
   IntegrationSettings,
   LedgerEntry,
+  MailInquiry,
   ParsedCommand,
+  PhysicalRoom,
   StayGuest,
 } from '../types/ops';
 
@@ -117,6 +120,45 @@ export interface SubmitGuestQrPayload {
   lang: string;
 }
 
+export interface MoveOrResizeSegmentPayload {
+  bookingId: string;
+  segmentId: string;
+  targetRoomId: string;
+  targetBedId?: string;
+  newFromDate: string;
+  newToDate: string;
+}
+
+export interface SplitStayPayload {
+  bookingId: string;
+  segmentId: string;
+  splitDate: string; // YYYY-MM-DD strictly between fromDate and toDate
+  targetRoomId: string;
+  targetBedId?: string;
+  targetNightlyRateUsd: number;
+}
+
+export interface CompleteNightAuditPayload {
+  noShowBookingIds: string[];
+  notes: string;
+}
+
+export interface AddLostFoundPayload {
+  itemName: string;
+  foundLocation: string;
+  guestName?: string;
+  notes: string;
+}
+
+export interface UpsertGuestProfilePayload {
+  passportNo: string;
+  fullName: string;
+  citizenship: string;
+  phone?: string;
+  tag: GuestTag;
+  notes: string;
+}
+
 export type OpsAction =
   | { type: 'CHECK_IN'; payload: CheckInPayload; nowIso?: string; todayIso?: string }
   | { type: 'CHECK_OUT'; payload: CheckOutPayload; nowIso?: string; timeHm?: string }
@@ -134,6 +176,29 @@ export type OpsAction =
   | { type: 'ADD_PAYMENT'; payload: AddPaymentPayload; nowIso?: string }
   | { type: 'ISSUE_REFUND'; payload: IssueRefundPayload; nowIso?: string }
   | { type: 'EXTEND_OR_MOVE_STAY'; payload: ExtendOrMovePayload; nowIso?: string; todayIso?: string }
+  | {
+      type: 'MOVE_OR_RESIZE_SEGMENT';
+      payload: MoveOrResizeSegmentPayload;
+      nowIso?: string;
+      todayIso?: string;
+    }
+  | {
+      type: 'RESTORE_BOOKINGS_AND_ROOMS';
+      payload: { bookings: BookingGroup[]; physicalRooms: PhysicalRoom[]; label: string };
+      nowIso?: string;
+    }
+  | {
+      type: 'SPLIT_STAY_BOOKING';
+      payload: SplitStayPayload;
+      nowIso?: string;
+      todayIso?: string;
+    }
+  | {
+      type: 'COMPLETE_NIGHT_AUDIT';
+      payload: CompleteNightAuditPayload;
+      nowIso?: string;
+      todayIso?: string;
+    }
   | { type: 'COMMIT_PARSED_COMMAND'; payload: ParsedCommand; nowIso?: string; todayIso?: string }
   | { type: 'MARK_EMEHMON_REGISTERED'; payload: { bookingId: string; guestId: string } }
   | { type: 'ADD_PETTY_CASH'; payload: { category: string; amountUzs: number; note: string }; nowIso?: string }
@@ -148,6 +213,8 @@ export type OpsAction =
   | { type: 'START_LAUNDRY'; payload: StartLaundryPayload; nowIso?: string }
   | { type: 'COMPLETE_LAUNDRY_JOB'; payload: { jobId: string }; timeHm?: string }
   | { type: 'SPEED_UP_LAUNDRY'; payload: { jobId: string; minusMinutes?: number }; timeHm?: string }
+  | { type: 'START_HOUSEKEEPING_TASK'; payload: { taskId: string }; nowIso?: string }
+  | { type: 'FINISH_HOUSEKEEPING_TASK'; payload: { taskId: string }; nowIso?: string }
   | { type: 'MAID_MARK_CLEANED'; payload: { taskId: string }; timeHm?: string }
   | { type: 'ADMIN_APPROVE_HOUSEKEEPING'; payload: { taskId: string } }
   | {
@@ -157,6 +224,11 @@ export type OpsAction =
     }
   | { type: 'ADD_LUGGAGE'; payload: AddLuggagePayload; nowIso?: string }
   | { type: 'RELEASE_LUGGAGE'; payload: { id: string } }
+  | { type: 'ADD_LOST_FOUND'; payload: AddLostFoundPayload; todayIso?: string }
+  | { type: 'RESOLVE_LOST_FOUND'; payload: { id: string } }
+  | { type: 'UPSERT_GUEST_PROFILE'; payload: UpsertGuestProfilePayload; todayIso?: string }
+  | { type: 'ADD_MAIL_INQUIRY'; payload: Omit<MailInquiry, 'id' | 'propertyId' | 'handled'> }
+  | { type: 'DISMISS_MAIL_INQUIRY'; payload: { id: string } }
   | { type: 'ADD_TRANSFER'; payload: AddTransferPayload }
   | { type: 'CYCLE_TRANSFER_STATUS'; payload: { id: string } }
   | { type: 'ADJUST_STOCK'; payload: { id: string; delta: number } }

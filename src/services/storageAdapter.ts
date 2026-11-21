@@ -1,5 +1,6 @@
 import type { AppState } from '../types/ops';
 import { createSeedState, SCHEMA_VERSION, STORAGE_KEY } from '../data/seed';
+import { getTashkentTodayIso } from '../utils/time';
 
 export type StorageAdapterKind = 'local' | 'supabase';
 export type SyncStatus = 'local' | 'synced' | 'syncing' | 'error' | 'conflict';
@@ -35,7 +36,15 @@ function isValidState(parsed: unknown): parsed is AppState {
   );
 }
 
-function normalizeLoadedState(state: AppState): AppState {
+/**
+ * Backward-compatible state migration & hydration helper.
+ * Safely backfills any fields introduced in later releases (luggageItems, lostFoundItems,
+ * shiftHistory, mailInbox, operationalDate, safeBalances, guestProfiles) without breaking
+ * existing localStorage or Supabase snapshots.
+ */
+export function migrateAppState(raw: unknown): AppState | null {
+  if (!isValidState(raw)) return null;
+  const state = raw;
   const revision =
     typeof state.revision === 'number' && Number.isFinite(state.revision) && state.revision >= 1
       ? Math.floor(state.revision)
@@ -57,8 +66,21 @@ function normalizeLoadedState(state: AppState): AppState {
     ...state,
     revision,
     adminRole,
+    operationalDate:
+      typeof state.operationalDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(state.operationalDate)
+        ? state.operationalDate
+        : getTashkentTodayIso(),
+    luggageItems: Array.isArray(state.luggageItems) ? state.luggageItems : [],
+    lostFoundItems: Array.isArray(state.lostFoundItems) ? state.lostFoundItems : [],
+    shiftHistory: Array.isArray(state.shiftHistory) ? state.shiftHistory : [],
+    mailInbox: Array.isArray(state.mailInbox) ? state.mailInbox : [],
+    guestProfiles: Array.isArray(state.guestProfiles) ? state.guestProfiles : [],
     pockets,
   };
+}
+
+function normalizeLoadedState(state: AppState): AppState {
+  return migrateAppState(state) ?? state;
 }
 
 /**

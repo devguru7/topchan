@@ -1,7 +1,8 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, RotateCcw, X } from 'lucide-react';
 import { useOps } from '../context/OpsContext';
+import { SPRING_SNAPPY } from '../utils/motion';
 
 const TONE_STYLES = {
   emerald: {
@@ -42,12 +43,12 @@ export const ToastStack: React.FC = () => {
             <motion.div
               key={toast.id}
               layout
-              initial={{ opacity: 0, y: 14, scale: 0.96 }}
+              initial={{ opacity: 0, y: 12, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.96 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-              style={{ borderColor: cfg.border }}
-              className="pointer-events-auto bg-[var(--bg-surface)]/95 backdrop-blur-md border rounded-2xl px-4 py-3 shadow-lg flex items-start gap-3"
+              exit={{ opacity: 0, y: 8, scale: 0.97 }}
+              transition={SPRING_SNAPPY}
+              style={{ borderColor: cfg.border, boxShadow: 'var(--shadow-popover)' }}
+              className="pointer-events-auto bg-[var(--bg-surface)]/95 backdrop-blur-[3px] border rounded-xl px-4 py-3 flex items-start gap-3"
             >
               <Icon
                 className="w-4 h-4 mt-0.5 shrink-0"
@@ -62,6 +63,19 @@ export const ToastStack: React.FC = () => {
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
                     {toast.description}
                   </p>
+                )}
+                {toast.actionLabel && toast.onAction && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toast.onAction?.();
+                      dismissToast(toast.id);
+                    }}
+                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border border-[var(--border-strong)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] transition-colors"
+                  >
+                    <RotateCcw className="w-3 h-3" strokeWidth={1.75} />
+                    <span>{toast.actionLabel}</span>
+                  </button>
                 )}
               </div>
               <button

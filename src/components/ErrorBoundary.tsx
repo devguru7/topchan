@@ -36,7 +36,10 @@ export class ErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl p-6 space-y-4 shadow-xl">
+          <div
+            className="max-w-md w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl p-6 space-y-4"
+            style={{ boxShadow: 'var(--shadow-popover)' }}
+          >
             <div className="flex items-center gap-3 text-[var(--tone-rose-fg)]">
               <AlertTriangle className="w-6 h-6 shrink-0" strokeWidth={1.75} />
               <h1 className="text-lg font-semibold text-[var(--text-primary)]">Сбой интерфейса Topchan Ops</h1>

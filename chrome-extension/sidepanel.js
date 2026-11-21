@@ -35,6 +35,8 @@ function isAllowedHostname(rawUrl, expectedRootDomain) {
   }
 }
 
+let lastMappedRoomCode = '';
+
 function readForm() {
   return {
     surname: els.surname.value.trim(),
@@ -44,6 +46,7 @@ function readForm() {
     dob: els.dob.value.trim(),
     checkInDate: els.checkInDate.value.trim(),
     checkOutDate: els.checkOutDate.value.trim(),
+    roomCode: lastMappedRoomCode,
   };
 }
 
@@ -56,6 +59,7 @@ function populateForm(guest) {
   if (guest.dob) els.dob.value = guest.dob;
   if (guest.checkInDate) els.checkInDate.value = guest.checkInDate;
   if (guest.checkOutDate) els.checkOutDate.value = guest.checkOutDate;
+  if (guest.roomCode) lastMappedRoomCode = guest.roomCode;
 }
 
 function clearFormFields() {
@@ -112,8 +116,9 @@ els.btnScrape.addEventListener('click', async () => {
         return;
       }
       populateForm(res.payload);
+      const roomSuffix = res.payload.roomCode ? ` · ${res.payload.roomCode}` : '';
       setStatus(
-        `Считано из Bnovo: ${res.payload.guestName || 'Бронь'} (${res.payload.bookingNumber})`,
+        `Считано из Bnovo: ${res.payload.guestName || 'Бронь'} (${res.payload.bookingNumber}${roomSuffix})`,
         'ok'
       );
     });

@@ -23,10 +23,23 @@ import {
   getTashkentYear,
 } from './time';
 import {
+  computeDailyAvailabilitySummary,
   findAlternativeFreeRooms,
   findRoomConflicts,
   hasDateOverlap,
 } from './availability';
+import { createEmptyCashFormDefaults } from './cashFormDefaults';
+import {
+  computeMrzCheckDigit,
+  parseTd3MrzStrict,
+  SAMPLE_MRZ_FEMALE_DE,
+} from './mrzParser';
+import {
+  buildCashPnlCsv,
+  buildShiftArchiveCsv,
+  buildTouristTaxCsv,
+} from './exportReports';
+import { migrateAppState } from '../services/storageAdapter';
 import { createSeedState, FALLBACK_CBU_USD, DEFAULT_BCV_UZS } from '../data/seed';
 import { parseSafeAmount } from '../../server/bnovo';
 
@@ -346,5 +359,175 @@ test('Topchan v4 inventory matches exact 20 physical rooms (17 private + 3 dorms
   assert.equal(yellow5Cmd.roomId, 'room-yellow-5');
   assert.equal(yellow5Cmd.roomLabel, 'Yellow-5');
 });
+
+test('STAGE 1 BUG 1 & 2: Cyrillic commandParser matches средняя стирка ($3), быстрая стирка ($2), ранний заезд, поздний выезд, and does NOT false-match Смолов as Small', () => {
+  const seed = createSeedState('2026-11-20');
+
+  const medLaundry = parseRussianReceptionCommand(
+    'Сикс 3, Дэвид Ли, 2 ночи, дал $30, сдача сумами, средняя стирка',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(medLaundry.extras.length, 1);
+  assert.equal(medLaundry.extras[0].type, 'laundry_medium');
+  assert.equal(medLaundry.extras[0].priceUsd, 3);
+
+  const fastLaundry = parseRussianReceptionCommand(
+    'Смолл 4, Иван Петров, 1 ночь, быстрая стирка',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(fastLaundry.extras[0]?.type, 'laundry_fast');
+  assert.equal(fastLaundry.extras[0]?.priceUsd, 2);
+
+  const earlyCheckIn = parseRussianReceptionCommand(
+    'Йеллоу 2, Алексей Смолов, 2 ночи, ранний заезд, дал $60',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(earlyCheckIn.roomId, 'room-yellow-2');
+  assert.equal(earlyCheckIn.guestName, 'Алексей Смолов');
+  assert.equal(earlyCheckIn.extras.some((e) => e.type === 'early_late'), true);
+  assert.equal(earlyCheckIn.extras.find((e) => e.type === 'early_late')?.priceUsd, 12); // 50% of $24
+
+  const lateCheckOut = parseRussianReceptionCommand(
+    'Оранж, Смолов, 1 ночь, поздний выезд',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(lateCheckOut.roomId, 'room-orange-1');
+  assert.equal(lateCheckOut.guestName, 'Смолов');
+  assert.equal(lateCheckOut.extras.some((e) => e.type === 'early_late'), true);
+
+  // Pure surname "Смолов" without a room keyword must NEVER trigger Small via substring "смол"
+  const smolovOnly = parseRussianReceptionCommand(
+    'Пинк, Смолов Дмитрий, 1 ночь',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(smolovOnly.roomId, 'room-pink-1');
+  assert.equal(smolovOnly.guestName, 'Смолов Дмитрий');
+});
+
+test('STAGE 1 BUG 3: computeDailyAvailabilitySummary reflects dirty and maintenance units matching availableUnits KPI', () => {
+  const seed = createSeedState('2026-11-20');
+  // Put one clean room into maintenance to test both dirty (Red is dirty in seed) and maintenance
+  const rooms = seed.physicalRooms.map((r) =>
+    r.id === 'room-orange-1' ? { ...r, status: 'maintenance' as const } : r
+  );
+
+  const availableUnits = rooms.reduce((sum, r) => {
+    if (r.archived) return sum;
+    if (r.beds) return sum + r.beds.filter((b) => b.status === 'available').length;
+    return sum + (r.status === 'available' ? 1 : 0);
+  }, 0);
+
+  const summary = computeDailyAvailabilitySummary(
+    rooms,
+    seed.bookings,
+    ['2026-11-20', '2026-11-21'],
+    '2026-11-20'
+  );
+
+  assert.equal(summary[0].iso, '2026-11-20');
+  assert.equal(summary[0].dirty, 1); // Red is dirty
+  assert.equal(summary[0].maintenance, 1); // Orange is maintenance
+  assert.equal(summary[0].free, availableUnits);
+  assert.equal(
+    summary[0].free + summary[0].occupied + summary[0].dirty + summary[0].maintenance,
+    37
+  );
+  // Future day excludes maintenance room from free count
+  assert.equal(summary[1].maintenance, 1);
+  assert.equal(summary[1].free + summary[1].occupied + summary[1].maintenance, 37);
+});
+
+test('STAGE 1 BUG 4: CashTab live form defaults start strictly empty/zero', () => {
+  const defaults = createEmptyCashFormDefaults();
+  assert.equal(defaults.billInputUsd, '');
+  assert.equal(defaults.receivedAmount, '');
+  assert.equal(defaults.calcLabel, '');
+  assert.equal(defaults.pettyCategory, '');
+  assert.equal(defaults.pettyAmount, '');
+  assert.equal(defaults.safeUzs, '');
+  assert.equal(defaults.safeUsd, '');
+  assert.equal(defaults.safeEur, '');
+  assert.equal(
+    Object.values(defaults.uzsBills).every((v) => v === 0),
+    true
+  );
+  assert.equal(
+    Object.values(defaults.usdBills).every((v) => v === 0),
+    true
+  );
+});
+
+test('STAGE 3 MRZ ICAO 9303 TD3: validates 7-3-1 check digits, extracts sex/dob/expiry, and flags tampered checksums', () => {
+  assert.equal(computeMrzCheckDigit('520727'), 3);
+
+  const validIta = parseTd3MrzStrict(SAMPLE_MRZ_ITALY, { refYear: 2026 });
+  assert.equal(validIta.valid, true);
+  assert.equal(validIta.checkDigits.allValid, true);
+  assert.equal(validIta.nationality, 'ITA');
+  assert.equal(validIta.sex, 'M');
+  assert.equal(validIta.dob, '1991-06-15');
+
+  const validDe = parseTd3MrzStrict(SAMPLE_MRZ_FEMALE_DE, { refYear: 2026 });
+  assert.equal(validDe.valid, true);
+  assert.equal(validDe.checkDigits.allValid, true);
+  assert.equal(validDe.sex, 'F');
+  assert.equal(validDe.nationality, 'DEU');
+
+  // Corrupt passport number check digit on line 2 (index 9) -> passportValid must flip false
+  const [l1, l2] = SAMPLE_MRZ_ITALY.split('\n');
+  const badDigit = String((Number(l2[9]) + 1) % 10);
+  const tampered = `${l1}\n${l2.slice(0, 9)}${badDigit}${l2.slice(10)}`;
+  const parsedTampered = parseTd3MrzStrict(tampered, { refYear: 2026, requireValidCheckDigits: true });
+  assert.equal(parsedTampered.valid, false);
+  assert.equal(parsedTampered.checkDigits.passportValid, false);
+  assert.equal(parsedTampered.checkDigits.allValid, false);
+});
+
+test('STAGE 3 CSV Exports: UTF-8 BOM, Uzbekistan BCV 440000 tourist tax, 6-pocket P&L, and Shift Archive', () => {
+  const seed = createSeedState('2026-11-20');
+
+  const taxCsv = buildTouristTaxCsv(seed);
+  assert.equal(taxCsv.startsWith('\uFEFF'), true);
+  assert.ok(taxCsv.includes('440000'));
+  assert.ok(taxCsv.includes('10% (11–40 комн.)'));
+
+  const pnlCsv = buildCashPnlCsv(seed);
+  assert.equal(pnlCsv.startsWith('\uFEFF'), true);
+  assert.ok(pnlCsv.includes('cash_uzs'));
+  assert.ok(pnlCsv.includes('cash_usd'));
+  assert.ok(pnlCsv.includes('cash_eur'));
+  assert.ok(pnlCsv.includes('P&L Сводка'));
+
+  const shiftsCsv = buildShiftArchiveCsv(seed.shiftHistory ?? []);
+  assert.equal(shiftsCsv.startsWith('\uFEFF'), true);
+  assert.ok(shiftsCsv.includes('Операционный день'));
+});
+
+test('STAGE 3 Backward Migration: legacy v4 snapshot missing operationalDate/lostFoundItems/shiftHistory/mailInbox hydrates safely', () => {
+  const seed = createSeedState('2026-11-20');
+  const legacyRaw = { ...seed } as Record<string, unknown>;
+  delete legacyRaw.operationalDate;
+  delete legacyRaw.lostFoundItems;
+  delete legacyRaw.shiftHistory;
+  delete legacyRaw.mailInbox;
+
+  const migrated = migrateAppState(legacyRaw);
+  assert.ok(migrated);
+  assert.ok(typeof migrated.operationalDate === 'string' && migrated.operationalDate.length === 10);
+  assert.ok(Array.isArray(migrated.lostFoundItems));
+  assert.ok(Array.isArray(migrated.shiftHistory));
+  assert.ok(Array.isArray(migrated.mailInbox));
+});
+
 
 

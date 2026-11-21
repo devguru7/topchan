@@ -212,11 +212,12 @@ export const CheckOutModal: React.FC = () => {
           initial={{ opacity: 0, y: 14, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-label="Выселение гостя"
-          className="w-full max-w-2xl rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+          style={{ boxShadow: 'var(--shadow-popover)' }}
+          className="w-full max-w-2xl rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] overflow-hidden my-auto max-h-[92vh] flex flex-col"
         >
           {/* Header */}
           <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3 shrink-0">

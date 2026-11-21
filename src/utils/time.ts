@@ -95,6 +95,18 @@ export function addDaysIso(baseIso: string, days: number): string {
 }
 
 /**
+ * Computes whole calendar day difference (toIso - fromIso) in UTC without DST drift.
+ */
+export function diffDaysIso(fromIso: string, toIso: string): number {
+  const [y1, m1, d1] = fromIso.split('-').map((n) => parseInt(n, 10));
+  const [y2, m2, d2] = toIso.split('-').map((n) => parseInt(n, 10));
+  if (!y1 || !m1 || !d1 || !y2 || !m2 || !d2) return 0;
+  const t1 = Date.UTC(y1, m1 - 1, d1);
+  const t2 = Date.UTC(y2, m2 - 1, d2);
+  return Math.round((t2 - t1) / (24 * 60 * 60 * 1000));
+}
+
+/**
  * Returns an array of N consecutive ISO dates starting from startIso.
  */
 export function getDateRangeIso(startIso: string, count: number): string[] {

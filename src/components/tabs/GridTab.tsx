@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Banknote,
   BedDouble,
-  Calendar,
+  Brush,
   CalendarRange,
   Check,
   CheckCircle2,
@@ -11,17 +11,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  CreditCard,
   DoorOpen,
+  FileText,
   LayoutGrid,
   Plus,
   QrCode,
   Search,
-  Sparkles,
   Wrench,
 } from 'lucide-react';
-import { useOps } from '../../context/OpsContext';
+import { useOps, useTimers } from '../../context/OpsContext';
 import type { GridFilterId, GridViewMode } from '../../context/UIContext';
-import type { BookingGroup, DormBed, PhysicalRoom, RoomCategory } from '../../types/ops';
+import type { BookingGroup, DormBed, PhysicalRoom, RoomCategory, StaySegment } from '../../types/ops';
+import { computeDailyAvailabilitySummary } from '../../utils/availability';
 import { calcBookingTotals, formatUsd } from '../../utils/math';
 import { getTopchanRoomColor } from '../../utils/roomColors';
 import {
@@ -31,6 +33,47 @@ import {
   getTashkentTodayIso,
 } from '../../utils/time';
 import { EmptyState, MetricTile, SegmentedControl, StatusPill } from '../ui';
+
+const TodayClockBadge: React.FC = () => {
+  const { clockStr } = useTimers();
+  return (
+    <span className="font-mono tabular-nums text-[10px] font-bold tracking-tight opacity-90">
+      {clockStr.slice(0, 5)}
+    </span>
+  );
+};
+
+function formatCompactGuestName(fullName?: string): string {
+  if (!fullName) return 'Гость';
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return parts[0];
+  return `${parts[0]} ${parts[1][0]}.`;
+}
+
+interface HoverInspectorState {
+  booking: BookingGroup;
+  segment: StaySegment;
+  roomLabel: string;
+  x: number;
+  y: number;
+}
+
+interface DraggingSegmentState {
+  bookingId: string;
+  segmentId: string;
+  mode: 'move' | 'resize-right';
+  nights: number;
+  origFromDate: string;
+  origToDate: string;
+  origRoomId: string;
+  origBedId?: string;
+}
+
+interface DropTargetState {
+  roomId: string;
+  bedId?: string;
+  iso: string;
+}
 
 const VIEW_MODE_OPTIONS: Array<{
   id: GridViewMode;
@@ -113,15 +156,71 @@ export const GridTab: React.FC = () => {
     openCheckOutModal,
     openQrPosterModal,
     openBookingFolio,
+    openWelcomeCardModal,
     setSelectedBookingId,
     setRoomHousekeepingStatus,
+    moveOrResizeSegment,
   } = useOps();
 
   const [search, setSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [hoverInspector, setHoverInspector] = useState<HoverInspectorState | null>(null);
+  const [draggingSeg, setDraggingSeg] = useState<DraggingSegmentState | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
+  const hoverShowTimerRef = useRef<number | null>(null);
+  const hoverHideTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hoverShowTimerRef.current) window.clearTimeout(hoverShowTimerRef.current);
+      if (hoverHideTimerRef.current) window.clearTimeout(hoverHideTimerRef.current);
+    };
+  }, []);
+
+  const scheduleShowInspector = (
+    e: React.MouseEvent<HTMLElement>,
+    booking: BookingGroup,
+    segment: StaySegment,
+    roomLabel: string
+  ) => {
+    if (hoverHideTimerRef.current) {
+      window.clearTimeout(hoverHideTimerRef.current);
+      hoverHideTimerRef.current = null;
+    }
+    if (hoverShowTimerRef.current) {
+      window.clearTimeout(hoverShowTimerRef.current);
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(12, rect.left), window.innerWidth - 304);
+    const y = rect.bottom + 8 + 185 > window.innerHeight ? Math.max(12, rect.top - 188) : rect.bottom + 8;
+    hoverShowTimerRef.current = window.setTimeout(() => {
+      setHoverInspector({ booking, segment, roomLabel, x, y });
+    }, 180);
+  };
+
+  const scheduleHideInspector = () => {
+    if (hoverShowTimerRef.current) {
+      window.clearTimeout(hoverShowTimerRef.current);
+      hoverShowTimerRef.current = null;
+    }
+    if (hoverHideTimerRef.current) {
+      window.clearTimeout(hoverHideTimerRef.current);
+    }
+    hoverHideTimerRef.current = window.setTimeout(() => {
+      setHoverInspector(null);
+    }, 140);
+  };
+
+  const keepInspectorOpen = () => {
+    if (hoverHideTimerRef.current) {
+      window.clearTimeout(hoverHideTimerRef.current);
+      hoverHideTimerRef.current = null;
+    }
+  };
 
   const todayIso = useMemo(() => getTashkentTodayIso(), []);
   const tapeDates = useMemo(() => getDateRangeIso(tapeStartDate, 14), [tapeStartDate]);
+  const todayColIdx = useMemo(() => tapeDates.indexOf(todayIso), [tapeDates, todayIso]);
   const windowStart = tapeDates[0];
   const windowEndExclusive = useMemo(
     () => addDaysIso(tapeDates[tapeDates.length - 1], 1),
@@ -234,25 +333,18 @@ export const GridTab: React.FC = () => {
     };
   }, [allUnits, state.bookings]);
 
-  // Daily availability & occupancy for the 14-day Tape Chart summary row
-  const dailySummary = useMemo(() => {
-    const totalUnits = allUnits.length;
-    const activeBookings = state.bookings.filter((b) => b.status === 'active');
-    return tapeDates.map((iso) => {
-      const occupiedKeys = new Set<string>();
-      for (const b of activeBookings) {
-        for (const seg of b.segments) {
-          if (seg.fromDate <= iso && iso < seg.toDate) {
-            occupiedKeys.add(seg.bedId ? `${seg.roomId}:${seg.bedId}` : seg.roomId);
-          }
-        }
-      }
-      const occupied = occupiedKeys.size;
-      const free = Math.max(0, totalUnits - occupied);
-      const pct = totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0;
-      return { iso, free, occupied, pct };
-    });
-  }, [allUnits.length, state.bookings, tapeDates]);
+  // Daily availability & occupancy synced with real dirty / maintenance unit statuses
+  const dailySummary = useMemo(
+    () => computeDailyAvailabilitySummary(state.physicalRooms, state.bookings, tapeDates, todayIso),
+    [state.physicalRooms, state.bookings, tapeDates, todayIso]
+  );
+
+  const todayStatusBreakdown = useMemo(() => {
+    const ready = allUnits.filter((u) => u.status === 'available').length;
+    const dirty = allUnits.filter((u) => u.status === 'dirty').length;
+    const maintenance = allUnits.filter((u) => u.status === 'maintenance').length;
+    return { ready, dirty, maintenance };
+  }, [allUnits]);
 
   const filterOptions = useMemo<Array<{ id: GridFilterId; label: string; badge?: number }>>(
     () => [
@@ -381,7 +473,7 @@ export const GridTab: React.FC = () => {
             bg: 'var(--tone-amber-bg)',
             border: 'var(--tone-amber-border)',
             fg: 'var(--tone-amber-fg)',
-            icon: Sparkles,
+            icon: Brush,
             label: 'Уборка',
           }
         : unit.status === 'maintenance'
@@ -612,16 +704,16 @@ export const GridTab: React.FC = () => {
           {gridViewMode === 'tape' && (
             <div className="hidden xl:flex items-center gap-3 text-xs text-[var(--text-secondary)]">
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#16A34A]" /> Оплачено
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--status-inhouse)' }} /> Проживает
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB]" /> Заезд
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--status-confirmed)' }} /> Бронь
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#D97706]" /> Выезд 12:00
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--status-checkout)' }} /> Выезд 12:00
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-[#DC2626]" /> Долг / E-mehmon
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--status-debt)' }} /> Долг / E-mehmon
               </span>
             </div>
           )}
@@ -668,12 +760,13 @@ export const GridTab: React.FC = () => {
                       <div
                         key={iso}
                         data-testid={isToday ? 'tape-col-today' : undefined}
-                        className="px-1.5 py-2 text-center border-r border-[var(--border-subtle)]"
+                        className="px-1.5 py-2 text-center border-r border-[var(--border-subtle)] relative"
                         style={
                           isToday
                             ? {
-                                backgroundColor: 'var(--tone-cobalt-bg)',
-                                color: 'var(--tone-cobalt-fg)',
+                                backgroundColor: 'var(--brand-primary-soft)',
+                                color: 'var(--brand-primary)',
+                                boxShadow: 'inset 0 2px 0 var(--brand-primary)',
                               }
                             : col.isWeekend
                               ? {
@@ -683,8 +776,9 @@ export const GridTab: React.FC = () => {
                               : { color: 'var(--text-secondary)' }
                         }
                       >
-                        <div className="text-xs font-bold uppercase leading-tight">
-                          {isToday ? 'Сег' : col.weekday}
+                        <div className="text-[11px] font-bold uppercase leading-tight flex items-center justify-center gap-1">
+                          <span>{isToday ? 'Сег' : col.weekday}</span>
+                          {isToday && <TodayClockBadge />}
                         </div>
                         <div className="text-xs font-mono tabular-nums font-semibold">
                           {col.dayMonth}
@@ -700,17 +794,31 @@ export const GridTab: React.FC = () => {
                   data-testid="tape-availability-row"
                   style={{ gridTemplateColumns: '204px repeat(14, minmax(63px, 1fr))' }}
                 >
-                  <div className="sticky left-0 z-30 bg-[var(--bg-surface)] px-3.5 py-1.5 text-xs font-semibold text-[var(--text-muted)] border-r border-[var(--border-subtle)] flex items-center justify-between">
-                    <span>Свободно / Загрузка</span>
-                    <span className="font-mono tabular-nums text-[var(--text-primary)]">
-                      {allUnits.length}
-                    </span>
+                  <div className="sticky left-0 z-30 bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-muted)] border-r border-[var(--border-subtle)] flex flex-col justify-center gap-0.5">
+                    <div className="flex items-center justify-between">
+                      <span>Свободно / Загрузка</span>
+                      <span className="font-mono tabular-nums text-[var(--text-primary)]">
+                        {allUnits.length}
+                      </span>
+                    </div>
+                    <div
+                      data-testid="tape-status-breakdown"
+                      className="text-[11px] font-mono tabular-nums text-[var(--text-muted)] truncate"
+                      title={`Готово: ${todayStatusBreakdown.ready} · Уборка: ${todayStatusBreakdown.dirty} · Ремонт: ${todayStatusBreakdown.maintenance}`}
+                    >
+                      Готово: {todayStatusBreakdown.ready} · Уборка: {todayStatusBreakdown.dirty} · Ремонт: {todayStatusBreakdown.maintenance}
+                    </div>
                   </div>
                   {dailySummary.map((day) => {
                     const isToday = day.iso === todayIso;
                     return (
                       <div
                         key={day.iso}
+                        title={
+                          isToday
+                            ? `Готово: ${day.free} · Занято: ${day.occupied} · Уборка: ${day.dirty} · Ремонт: ${day.maintenance}`
+                            : `Свободно: ${day.free} · Занято: ${day.occupied} · Ремонт: ${day.maintenance}`
+                        }
                         className="px-1 py-1.5 text-center border-r border-[var(--border-subtle)] font-mono tabular-nums leading-tight"
                         style={
                           isToday
@@ -731,15 +839,33 @@ export const GridTab: React.FC = () => {
                         >
                           {day.free} своб.
                         </div>
-                        <div className="text-xs text-[var(--text-muted)]">{day.pct}%</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          {day.pct}%
+                          {isToday && (day.dirty > 0 || day.maintenance > 0)
+                            ? ` · ${day.dirty + day.maintenance} блок`
+                            : ''}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Collapsible Category Groups & Rows */}
-              <div>
+              {/* Collapsible Category Groups & Rows + Live Vertical Terracotta "Today (UZT)" Line */}
+              <div className="relative">
+                {todayColIdx >= 0 && (
+                  <div
+                    aria-hidden="true"
+                    data-testid="tape-today-line"
+                    className="pointer-events-none absolute top-0 bottom-0 z-15"
+                    style={{
+                      left: `calc(204px + ((100% - 204px) / 14) * ${todayColIdx})`,
+                      width: '1.5px',
+                      backgroundColor: 'var(--brand-primary)',
+                      opacity: 0.72,
+                    }}
+                  />
+                )}
                 {tapeGroups.map((group) => {
                   const isCollapsed = Boolean(collapsedGroups[group.id]);
                   const freeCount = group.rows.filter((r) => r.status === 'available').length;
@@ -840,10 +966,15 @@ export const GridTab: React.FC = () => {
                                   {renderInlineHousekeepingBtn(unit)}
                                 </div>
 
-                                {/* 14 Clickable Day Cells */}
+                                {/* 14 Clickable & Droppable Day Cells */}
                                 {tapeDates.map((iso) => {
                                   const isToday = iso === todayIso;
                                   const col = formatShortDateColumn(iso);
+                                  const isDropHover =
+                                    dropTarget !== null &&
+                                    dropTarget.roomId === unit.roomId &&
+                                    (dropTarget.bedId ?? '') === (unit.bedId ?? '') &&
+                                    dropTarget.iso === iso;
                                   return (
                                     <button
                                       key={iso}
@@ -856,14 +987,79 @@ export const GridTab: React.FC = () => {
                                           fromDate: iso,
                                         })
                                       }
-                                      title={`Заселить в ${unit.label} с ${iso}`}
+                                      onDragOver={(e) => {
+                                        if (!draggingSeg) return;
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                        if (
+                                          !dropTarget ||
+                                          dropTarget.roomId !== unit.roomId ||
+                                          (dropTarget.bedId ?? '') !== (unit.bedId ?? '') ||
+                                          dropTarget.iso !== iso
+                                        ) {
+                                          setDropTarget({
+                                            roomId: unit.roomId,
+                                            bedId: unit.bedId,
+                                            iso,
+                                          });
+                                        }
+                                      }}
+                                      onDragLeave={() => {
+                                        if (
+                                          dropTarget &&
+                                          dropTarget.roomId === unit.roomId &&
+                                          (dropTarget.bedId ?? '') === (unit.bedId ?? '') &&
+                                          dropTarget.iso === iso
+                                        ) {
+                                          setDropTarget(null);
+                                        }
+                                      }}
+                                      onDrop={(e) => {
+                                        e.preventDefault();
+                                        if (!draggingSeg) return;
+                                        const activeDrag = draggingSeg;
+                                        setDraggingSeg(null);
+                                        setDropTarget(null);
+
+                                        if (activeDrag.mode === 'resize-right') {
+                                          const candidateToDate = addDaysIso(iso, 1);
+                                          if (candidateToDate <= activeDrag.origFromDate) return;
+                                          moveOrResizeSegment({
+                                            bookingId: activeDrag.bookingId,
+                                            segmentId: activeDrag.segmentId,
+                                            targetRoomId: activeDrag.origRoomId,
+                                            targetBedId: activeDrag.origBedId,
+                                            newFromDate: activeDrag.origFromDate,
+                                            newToDate: candidateToDate,
+                                          });
+                                        } else {
+                                          const newToDate = addDaysIso(
+                                            iso,
+                                            Math.max(1, activeDrag.nights)
+                                          );
+                                          moveOrResizeSegment({
+                                            bookingId: activeDrag.bookingId,
+                                            segmentId: activeDrag.segmentId,
+                                            targetRoomId: unit.roomId,
+                                            targetBedId: unit.bedId,
+                                            newFromDate: iso,
+                                            newToDate,
+                                          });
+                                        }
+                                      }}
+                                      title={`Заселить в ${unit.label} с ${iso} (или перетащите бронь сюда)`}
                                       className="border-r border-[var(--border-subtle)] h-full min-h-[46px] transition-colors hover:bg-[var(--tone-cobalt-bg)] focus:outline-none"
                                       style={
-                                        isToday
-                                          ? { backgroundColor: 'rgba(37, 99, 235, 0.05)' }
-                                          : col.isWeekend
-                                            ? { backgroundColor: 'rgba(148, 163, 184, 0.05)' }
-                                            : undefined
+                                        isDropHover
+                                          ? {
+                                              backgroundColor: 'var(--brand-primary-soft)',
+                                              boxShadow: 'inset 0 0 0 2px var(--brand-primary)',
+                                            }
+                                          : isToday
+                                            ? { backgroundColor: 'rgba(196, 98, 45, 0.05)' }
+                                            : col.isWeekend
+                                              ? { backgroundColor: 'rgba(148, 163, 184, 0.05)' }
+                                              : undefined
                                       }
                                     />
                                   );
@@ -908,30 +1104,34 @@ export const GridTab: React.FC = () => {
                                           backgroundColor: 'var(--pms-archived-bg)',
                                           borderColor: 'var(--pms-archived-border)',
                                           color: 'var(--pms-archived-text)',
+                                          boxShadow: 'inset 3px 0 0 var(--pms-archived-border)',
                                         }
                                       : isAlert
                                         ? {
                                             backgroundColor: 'var(--pms-alert-bg)',
                                             borderColor: 'var(--pms-alert-border)',
                                             color: 'var(--pms-alert-text)',
-                                            boxShadow: 'inset 3px 0 0 #DC2626',
+                                            boxShadow: 'inset 3px 0 0 var(--status-debt)',
                                           }
                                         : isCheckoutToday
                                           ? {
                                               backgroundColor: 'var(--pms-checkout-bg)',
                                               borderColor: 'var(--pms-checkout-border)',
                                               color: 'var(--pms-checkout-text)',
+                                              boxShadow: 'inset 3px 0 0 var(--status-checkout)',
                                             }
                                           : isFutureArrival
                                             ? {
                                                 backgroundColor: 'var(--pms-confirmed-bg)',
                                                 borderColor: 'var(--pms-confirmed-border)',
                                                 color: 'var(--pms-confirmed-text)',
+                                                boxShadow: 'inset 3px 0 0 var(--status-confirmed)',
                                               }
                                             : {
                                                 backgroundColor: 'var(--pms-paid-bg)',
                                                 borderColor: 'var(--pms-paid-border)',
                                                 color: 'var(--pms-paid-text)',
+                                                boxShadow: 'inset 3px 0 0 var(--status-inhouse)',
                                               };
 
                                     const statusNote = isArchived
@@ -944,41 +1144,131 @@ export const GridTab: React.FC = () => {
                                             ? 'Выезд сегодня 12:00'
                                             : 'Оплачено';
 
+                                    const segIndex = booking.segments.findIndex(
+                                      (s) => s.id === segment.id
+                                    );
+                                    const isSplitBooking = booking.segments.length > 1;
+                                    const isBeingDragged =
+                                      draggingSeg?.segmentId === segment.id &&
+                                      draggingSeg?.bookingId === booking.id;
+
                                     return (
-                                      <button
+                                      <div
                                         key={segment.id}
-                                        type="button"
+                                        role="button"
+                                        tabIndex={0}
+                                        draggable={!isArchived}
                                         data-testid={`tape-bar-${booking.id}`}
-                                        title={`${guest?.fullName ?? 'Гость'} · ${segment.fromDate} → ${segment.toDate} · ${statusNote}`}
-                                        onClick={() => setSelectedBookingId(booking.id)}
+                                        title={`${guest?.fullName ?? 'Гость'} · ${segment.fromDate} → ${segment.toDate} · ${statusNote}${!isArchived ? ' · Перетащите для переноса или потяните правый край' : ''}`}
+                                        onClick={() => {
+                                          setHoverInspector(null);
+                                          setSelectedBookingId(booking.id);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            setHoverInspector(null);
+                                            setSelectedBookingId(booking.id);
+                                          }
+                                        }}
+                                        onDragStart={(e) => {
+                                          if (isArchived) {
+                                            e.preventDefault();
+                                            return;
+                                          }
+                                          setHoverInspector(null);
+                                          e.dataTransfer.effectAllowed = 'move';
+                                          e.dataTransfer.setData('text/plain', segment.id);
+                                          setDraggingSeg({
+                                            bookingId: booking.id,
+                                            segmentId: segment.id,
+                                            mode: 'move',
+                                            nights: segment.nights,
+                                            origFromDate: segment.fromDate,
+                                            origToDate: segment.toDate,
+                                            origRoomId: segment.roomId,
+                                            origBedId: segment.bedId,
+                                          });
+                                        }}
+                                        onDragEnd={() => {
+                                          setDraggingSeg(null);
+                                          setDropTarget(null);
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          if (!draggingSeg) {
+                                            scheduleShowInspector(e, booking, segment, unit.label);
+                                          }
+                                        }}
+                                        onMouseLeave={scheduleHideInspector}
                                         style={{
                                           gridColumn: `${startIdx + 1} / span ${spanCols}`,
                                           ...barStyle,
+                                          opacity: isBeingDragged ? 0.45 : undefined,
                                         }}
-                                        className="pointer-events-auto mx-0.5 rounded-lg border px-1.5 py-1 text-left flex items-center justify-between gap-1 overflow-hidden transition-opacity hover:opacity-90 shadow-2xs"
+                                        className={`pointer-events-auto relative self-center h-[30px] mx-0.5 rounded-[6px] border pl-2 pr-2.5 text-left flex items-center justify-between gap-1.5 overflow-hidden transition-opacity hover:opacity-95 ${
+                                          isArchived ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+                                        }`}
                                       >
-                                        <span className="flex items-center gap-1.5 text-xs font-semibold truncate">
-                                          {isAlert && (
-                                            <AlertCircle
-                                              className="w-3.5 h-3.5 shrink-0"
-                                              strokeWidth={2}
-                                            />
-                                          )}
+                                        <span className="flex items-center gap-1.5 text-[12px] font-medium truncate leading-none">
                                           <span className="truncate">
-                                            {guest?.fullName ?? 'Гость'}
+                                            {formatCompactGuestName(guest?.fullName)}
                                           </span>
+                                          {isSplitBooking && (
+                                            <span
+                                              title={`Split-Stay: отрезок ${segIndex + 1} из ${booking.segments.length}`}
+                                              className="font-mono text-[10px] px-1 py-0.5 rounded border border-dashed border-current/45 opacity-85 shrink-0 leading-none"
+                                            >
+                                              {segIndex + 1}/{booking.segments.length}⇄
+                                            </span>
+                                          )}
                                         </span>
 
-                                        <span className="font-mono text-xs font-bold shrink-0 tabular-nums">
-                                          {fin.debtUsd > 0
-                                            ? `−$${fin.debtUsd}`
-                                            : hasUnregForeigner && !isArchived
-                                              ? 'E-mehmon!'
-                                              : isCheckoutToday
-                                                ? '12:00'
-                                                : ''}
+                                        <span className="flex items-center gap-1 font-mono text-[11px] font-semibold shrink-0 tabular-nums leading-none">
+                                          {fin.debtUsd > 0 && <span>−${fin.debtUsd}</span>}
+                                          {hasUnregForeigner && !isArchived && (
+                                            <span
+                                              aria-label="Требуется регистрация E-mehmon"
+                                              className="w-1.5 h-1.5 rounded-full shrink-0"
+                                              style={{ backgroundColor: 'var(--status-debt)' }}
+                                            />
+                                          )}
+                                          {!fin.debtUsd && !hasUnregForeigner && isCheckoutToday && (
+                                            <span>12:00</span>
+                                          )}
                                         </span>
-                                      </button>
+
+                                        {/* Right-edge resize handle for extending/shortening nights */}
+                                        {!isArchived && (
+                                          <span
+                                            draggable
+                                            title="Потяните правый край на нужную дату выезда, чтобы изменить кол-во ночей"
+                                            aria-label="Изменить дату выезда перетаскиванием"
+                                            onClick={(e) => e.stopPropagation()}
+                                            onDragStart={(e) => {
+                                              e.stopPropagation();
+                                              setHoverInspector(null);
+                                              e.dataTransfer.effectAllowed = 'move';
+                                              e.dataTransfer.setData('text/plain', `resize:${segment.id}`);
+                                              setDraggingSeg({
+                                                bookingId: booking.id,
+                                                segmentId: segment.id,
+                                                mode: 'resize-right',
+                                                nights: segment.nights,
+                                                origFromDate: segment.fromDate,
+                                                origToDate: segment.toDate,
+                                                origRoomId: segment.roomId,
+                                                origBedId: segment.bedId,
+                                              });
+                                            }}
+                                            onDragEnd={(e) => {
+                                              e.stopPropagation();
+                                              setDraggingSeg(null);
+                                              setDropTarget(null);
+                                            }}
+                                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-current/25 transition-colors"
+                                          />
+                                        )}
+                                      </div>
                                     );
                                   })}
                                 </div>
@@ -1381,6 +1671,90 @@ export const GridTab: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* 180ms Smart Hover Inspector Popover */}
+      {hoverInspector && (() => {
+        const { booking, segment, roomLabel, x, y } = hoverInspector;
+        const guest = booking.guests[0];
+        const fin = calcBookingTotals(booking);
+        const unregForeigners = booking.guests.filter((g) => g.isForeigner && !g.emehmonRegistered);
+        return (
+          <div
+            role="tooltip"
+            data-testid="tape-hover-inspector"
+            onMouseEnter={keepInspectorOpen}
+            onMouseLeave={scheduleHideInspector}
+            style={{ left: `${x}px`, top: `${y}px`, boxShadow: 'var(--shadow-popover)' }}
+            className="fixed z-40 w-[292px] rounded-xl bg-[var(--bg-surface)] border border-[var(--border-strong)] p-3.5 space-y-2.5 no-print"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-[var(--text-primary)] truncate">
+                  {guest?.fullName ?? 'Гость'}
+                </div>
+                <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums">
+                  {roomLabel} · {guest?.citizenship ?? '—'} · {booking.bnovoId}
+                </div>
+              </div>
+              <StatusPill tone={fin.debtUsd > 0 ? 'rose' : 'emerald'} mono>
+                {fin.debtUsd > 0 ? `−${formatUsd(fin.debtUsd)}` : 'Оплачено'}
+              </StatusPill>
+            </div>
+
+            <div className="flex items-center justify-between text-xs py-1.5 border-y border-[var(--border-subtle)] font-mono tabular-nums">
+              <span className="text-[var(--text-secondary)]">
+                {segment.fromDate.slice(5)} → {segment.toDate.slice(5)} ({segment.nights} н.)
+              </span>
+              <span
+                className="font-sans font-semibold"
+                style={{
+                  color:
+                    unregForeigners.length > 0
+                      ? 'var(--tone-rose-fg)'
+                      : 'var(--tone-emerald-fg)',
+                }}
+              >
+                {unregForeigners.length > 0 ? 'E-mehmon (72ч!)' : 'E-mehmon ОК'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setHoverInspector(null);
+                  openBookingFolio(booking.id);
+                }}
+                className="h-8 px-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center justify-center gap-1 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                Фолио
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHoverInspector(null);
+                  openBookingFolio(booking.id, { openPayment: true });
+                }}
+                className="h-8 px-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center justify-center gap-1 transition-colors"
+              >
+                <CreditCard className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                Оплата
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHoverInspector(null);
+                  openWelcomeCardModal(booking.id);
+                }}
+                className="ops-brand-btn h-8 px-2 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1"
+              >
+                Welcome
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

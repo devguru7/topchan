@@ -153,7 +153,7 @@ export async function parseReceptionCommandSmart(
             ? calcChangeUzs(overpaidUsd, currency.exRate)
             : 0,
         changeUsd: overpaidUsd > 0 && changeCurrency === 'USD' ? overpaidUsd : 0,
-        confidenceNote: `Распознано Gemini AI: ${matchedRoom?.code ?? localFallback.roomLabel}, ${nights} н. × $${nightlyRateUsd}`,
+        confidenceNote: `Распознано сервером: ${matchedRoom?.code ?? localFallback.roomLabel}, ${nights} н. × $${nightlyRateUsd}`,
       },
     };
   } catch {
@@ -183,7 +183,7 @@ export async function extractPassportMrzFromPhoto(
       return {
         mrzRaw: '',
         engine: 'fallback',
-        note: 'Gemini Vision недоступен (офлайн или нет ключа на сервере) — вставьте 2 строки MRZ вручную или используйте образец ниже.',
+        note: 'Сканирование с фото недоступно (офлайн или нет ключа на сервере) — вставьте 2 строки MRZ вручную или используйте образец ниже.',
       };
     }
 
@@ -192,7 +192,7 @@ export async function extractPassportMrzFromPhoto(
       return {
         mrzRaw: data.mrzRaw.trim(),
         engine: 'gemini',
-        note: 'MRZ извлечён с фото через Gemini Vision (снимок удалён из памяти).',
+        note: 'MRZ извлечён с фото паспорта (снимок удалён из памяти).',
       };
     }
 

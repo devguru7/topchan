@@ -13,6 +13,7 @@ import type {
   CurrencySettings,
   IntegrationSettings,
   LedgerEntry,
+  MailInquiry,
   ParsedCommand,
 } from '../types/ops';
 import { FALLBACK_CBU_EUR, FALLBACK_CBU_USD } from '../data/seed';
@@ -24,10 +25,17 @@ import {
   type StorageAdapterKind,
   type SyncStatusInfo,
 } from '../services/storageAdapter';
+import {
+  getNormalizedSupabaseSync,
+  type OfflineSyncStatus,
+} from '../services/supabaseNormalizedAdapter';
 import { opsReducer } from '../store/opsReducer';
 import {
   validateCheckOutGuards,
+  validateFemaleOnlyRoom,
   validateGuestPayment,
+  validateMoveOrResizeSegment,
+  validateSplitStay,
 } from '../store/handlers/bookingHandlers';
 import {
   validateCashCalc,
@@ -35,16 +43,21 @@ import {
   validateSafeCollection,
 } from '../store/handlers/cashHandlers';
 import type {
+  AddLostFoundPayload,
   AddLuggagePayload,
   AddPaymentPayload,
   AddTransferPayload,
   CheckInPayload,
   CheckOutPayload,
+  CompleteNightAuditPayload,
   ExtendOrMovePayload,
   IssueRefundPayload,
+  MoveOrResizeSegmentPayload,
   RecordCashCalcPayload,
+  SplitStayPayload,
   StartLaundryPayload,
   SubmitGuestQrPayload,
+  UpsertGuestProfilePayload,
 } from '../store/types';
 import { useUI } from './UIContext';
 
@@ -52,6 +65,8 @@ export interface OpsDataContextValue {
   state: AppState;
   storageKind: StorageAdapterKind;
   syncStatusInfo: SyncStatusInfo;
+  offlineSyncStatus: OfflineSyncStatus;
+  flushOfflineQueue: () => Promise<void>;
   checkIn: (payload: CheckInPayload) => boolean;
   checkOut: (payload: CheckOutPayload) => boolean;
   addLedgerCharge: (
@@ -64,11 +79,16 @@ export interface OpsDataContextValue {
   addPayment: (params: AddPaymentPayload) => boolean;
   issueRefund: (params: IssueRefundPayload) => boolean;
   extendOrMoveStay: (params: ExtendOrMovePayload) => boolean;
+  moveOrResizeSegment: (params: MoveOrResizeSegmentPayload) => boolean;
+  splitStayBooking: (params: SplitStayPayload) => boolean;
+  completeNightAudit: (params: CompleteNightAuditPayload) => void;
   commitParsedCommand: (cmd: ParsedCommand) => boolean;
   toggleChecklistItem: (id: string) => void;
   startLaundryJob: (params: StartLaundryPayload) => void;
   completeLaundryJob: (jobId: string) => void;
   speedUpLaundry: (jobId: string, minusMinutes?: number) => void;
+  startHousekeepingTask: (taskId: string, maidName?: string) => void;
+  finishHousekeepingTask: (taskId: string, maidName?: string) => void;
   maidMarkCleaned: (taskId: string) => void;
   adminApproveHousekeeping: (taskId: string) => void;
   setRoomHousekeepingStatus: (
@@ -78,6 +98,8 @@ export interface OpsDataContextValue {
   ) => void;
   addLuggageItem: (params: AddLuggagePayload) => void;
   releaseLuggageItem: (id: string) => void;
+  addLostFoundItem: (params: AddLostFoundPayload) => void;
+  resolveLostFoundItem: (id: string) => void;
   addTransferJob: (params: AddTransferPayload) => void;
   cycleTransferStatus: (id: string) => void;
   adjustStock: (id: string, delta: number) => void;
@@ -88,6 +110,10 @@ export interface OpsDataContextValue {
   submitGuestQrRequest: (params: SubmitGuestQrPayload) => void;
   updateTelegramAlertDraft: (alertId: string, draftReply: string) => void;
   executeTelegramAction: (alertId: string, actionId: string) => void;
+  upsertGuestProfile: (params: UpsertGuestProfilePayload) => void;
+  addMailInquiry: (params: Omit<MailInquiry, 'id' | 'propertyId' | 'handled'>) => void;
+  dismissMailInquiry: (id: string) => void;
+  syncMailInbox: () => Promise<void>;
   addPhysicalRoom: (categoryId: string, customCode?: string) => void;
   archivePhysicalRoom: (roomId: string) => void;
   updateCategoryPrice: (categoryId: string, occupancy: number, priceUsd: number) => void;
@@ -102,9 +128,13 @@ const OpsDataContext = createContext<OpsDataContextValue | null>(null);
 
 export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const adapter = useMemo(() => getStorageAdapter(), []);
+  const normalizedSync = useMemo(() => getNormalizedSupabaseSync(), []);
   const [state, dispatch] = useReducer(opsReducer, undefined, () => adapter.loadState());
   const [syncStatusInfo, setSyncStatusInfo] = useState<SyncStatusInfo>(() =>
     adapter.getSyncStatus()
+  );
+  const [offlineSyncStatus, setOfflineSyncStatus] = useState<OfflineSyncStatus>(() =>
+    normalizedSync.getStatus()
   );
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -116,12 +146,34 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     closeCheckInModal,
     openCheckOutModal,
     closeCheckOutModal,
+    openWelcomeCardModal,
   } = useUI();
 
-  // Persist on every domain state change
+  // Persist on every domain state change + enqueue normalized sync if Supabase configured
   useEffect(() => {
     adapter.saveState(state);
-  }, [adapter, state]);
+    if (normalizedSync.isConfigured) {
+      normalizedSync.enqueueNormalizedSync(state);
+    }
+  }, [adapter, normalizedSync, state]);
+
+  // Subscribe to offline queue & realtime updates
+  useEffect(() => {
+    const unsubOffline = normalizedSync.subscribeStatus((status) => {
+      setOfflineSyncStatus(status);
+    });
+    const unsubRealtime = normalizedSync.startRealtimeChannel(stateRef.current.propertyId, () => {
+      if (adapter.kind === 'supabase') {
+        void adapter.loadStateAsync().then((remote) => {
+          if (remote) dispatch({ type: 'HYDRATE_STATE', payload: remote });
+        });
+      }
+    });
+    return () => {
+      unsubOffline();
+      unsubRealtime();
+    };
+  }, [adapter, normalizedSync]);
 
   // Cross-tab & remote sync (e.g. Guest Standalone QR tab -> Admin Telegram feed)
   useEffect(() => {
@@ -225,8 +277,21 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
+  const flushOfflineQueue = useCallback(async () => {
+    const flushed = await normalizedSync.flushQueue();
+    if (flushed > 0) {
+      pushToast('Очередь синхронизирована', `Отправлено пакетов в базу: ${flushed}`, 'emerald');
+    }
+  }, [normalizedSync, pushToast]);
+
   const checkIn = useCallback(
     (payload: CheckInPayload): boolean => {
+      const femaleErr = validateFemaleOnlyRoom(stateRef.current, payload.roomId, payload.guests);
+      if (femaleErr) {
+        pushToast('Женский дорм (Fem Dorm)', femaleErr, 'rose');
+        return false;
+      }
+
       const fromDate = payload.fromDate || getTashkentTodayIso();
       const toDate = addDaysIso(fromDate, Math.max(1, payload.nights));
       const conflicts = findRoomConflicts(
@@ -259,16 +324,24 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       }
 
+      const prevIds = new Set(stateRef.current.bookings.map((b) => b.id));
       dispatch({ type: 'CHECK_IN', payload });
       closeCheckInModal();
       pushToast(
         'Заселение оформлено',
         `${payload.guests[0]?.fullName ?? 'Гость'} успешно заселён`,
-        'emerald'
+        'emerald',
+        {
+          label: 'Welcome-карта',
+          onClick: () => {
+            const newest = stateRef.current.bookings.find((b) => !prevIds.has(b.id));
+            if (newest) openWelcomeCardModal(newest.id);
+          },
+        }
       );
       return true;
     },
-    [closeCheckInModal, pushToast]
+    [closeCheckInModal, openWelcomeCardModal, pushToast]
   );
 
   const addLedgerCharge = useCallback(
@@ -380,6 +453,99 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         'cobalt'
       );
       return true;
+    },
+    [pushToast]
+  );
+
+  const moveOrResizeSegment = useCallback(
+    (params: MoveOrResizeSegmentPayload): boolean => {
+      const err = validateMoveOrResizeSegment(stateRef.current, params);
+      if (err) {
+        pushToast('Перенос заблокирован', err, 'rose');
+        return false;
+      }
+      const prevBookings = stateRef.current.bookings;
+      const prevPhysicalRooms = stateRef.current.physicalRooms;
+      const bkg = prevBookings.find((b) => b.id === params.bookingId);
+      const guestName = bkg?.guests[0]?.fullName ?? 'Бронь';
+      const room = stateRef.current.physicalRooms.find((r) => r.id === params.targetRoomId);
+      const bed = params.targetBedId ? room?.beds?.find((b) => b.id === params.targetBedId) : undefined;
+      const targetLabel = room ? (bed ? `${room.code} ${bed.label}` : room.code) : params.targetRoomId;
+
+      dispatch({ type: 'MOVE_OR_RESIZE_SEGMENT', payload: params });
+      pushToast(
+        'Бронь обновлена на шахматке',
+        `${guestName} → ${targetLabel} (${params.newFromDate} — ${params.newToDate})`,
+        'emerald',
+        {
+          label: 'Отменить',
+          onClick: () => {
+            dispatch({
+              type: 'RESTORE_BOOKINGS_AND_ROOMS',
+              payload: {
+                bookings: prevBookings,
+                physicalRooms: prevPhysicalRooms,
+                label: `Отмена переноса ${guestName}`,
+              },
+            });
+            pushToast('Перенос отменён', `${guestName} возвращён на прежние даты`, 'cobalt');
+          },
+        }
+      );
+      return true;
+    },
+    [pushToast]
+  );
+
+  const splitStayBooking = useCallback(
+    (params: SplitStayPayload): boolean => {
+      const err = validateSplitStay(stateRef.current, params);
+      if (err) {
+        pushToast('Переселение (Split-Stay) отклонено', err, 'rose');
+        return false;
+      }
+      const prevBookings = stateRef.current.bookings;
+      const prevPhysicalRooms = stateRef.current.physicalRooms;
+      const bkg = prevBookings.find((b) => b.id === params.bookingId);
+      const guestName = bkg?.guests[0]?.fullName ?? 'Гость';
+      const room = stateRef.current.physicalRooms.find((r) => r.id === params.targetRoomId);
+      const bed = params.targetBedId ? room?.beds?.find((b) => b.id === params.targetBedId) : undefined;
+      const targetLabel = room ? (bed ? `${room.code} ${bed.label}` : room.code) : params.targetRoomId;
+
+      dispatch({ type: 'SPLIT_STAY_BOOKING', payload: params });
+      pushToast(
+        'Split-Stay оформлен',
+        `${guestName}: с ${params.splitDate} → ${targetLabel} (единый баланс сохранён)`,
+        'emerald',
+        {
+          label: 'Отменить',
+          onClick: () => {
+            dispatch({
+              type: 'RESTORE_BOOKINGS_AND_ROOMS',
+              payload: {
+                bookings: prevBookings,
+                physicalRooms: prevPhysicalRooms,
+                label: `Отмена Split-Stay ${guestName}`,
+              },
+            });
+            pushToast('Split-Stay отменён', `${guestName} возвращён в исходный номер`, 'cobalt');
+          },
+        }
+      );
+      return true;
+    },
+    [pushToast]
+  );
+
+  const completeNightAudit = useCallback(
+    (params: CompleteNightAuditPayload) => {
+      const currentOpDate = stateRef.current.operationalDate ?? getTashkentTodayIso();
+      dispatch({ type: 'COMPLETE_NIGHT_AUDIT', payload: params });
+      pushToast(
+        'Ночной аудит завершён',
+        `Операционный день ${currentOpDate} закрыт и архивирован. Незаездов отменено: ${params.noShowBookingIds.length}`,
+        'emerald'
+      );
     },
     [pushToast]
   );
@@ -507,6 +673,28 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pushToast]
   );
 
+  const startHousekeepingTask = useCallback(
+    (taskId: string, maidName?: string) => {
+      const task = stateRef.current.housekeepingTasks.find((t) => t.id === taskId);
+      dispatch({ type: 'START_HOUSEKEEPING_TASK', payload: { taskId } });
+      if (task) {
+        pushToast('Уборка начата', `${task.roomLabel}${maidName ? ` · ${maidName}` : ''} · таймер запущен`, 'cobalt');
+      }
+    },
+    [pushToast]
+  );
+
+  const finishHousekeepingTask = useCallback(
+    (taskId: string, maidName?: string) => {
+      const task = stateRef.current.housekeepingTasks.find((t) => t.id === taskId);
+      dispatch({ type: 'FINISH_HOUSEKEEPING_TASK', payload: { taskId } });
+      if (task) {
+        pushToast('Чисто и готово', `${task.roomLabel}${maidName ? ` (${maidName})` : ''} свободна на Шахматке`, 'emerald');
+      }
+    },
+    [pushToast]
+  );
+
   const maidMarkCleaned = useCallback(
     (taskId: string) => {
       dispatch({ type: 'MAID_MARK_CLEANED', payload: { taskId } });
@@ -569,6 +757,22 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     (id: string) => {
       dispatch({ type: 'RELEASE_LUGGAGE', payload: { id } });
       pushToast('Багаж выдан гостю', 'Бирка закрыта', 'emerald');
+    },
+    [pushToast]
+  );
+
+  const addLostFoundItem = useCallback(
+    (params: AddLostFoundPayload) => {
+      dispatch({ type: 'ADD_LOST_FOUND', payload: params });
+      pushToast('Запись в Бюро находок', `${params.itemName} · ${params.foundLocation}`, 'cobalt');
+    },
+    [pushToast]
+  );
+
+  const resolveLostFoundItem = useCallback(
+    (id: string) => {
+      dispatch({ type: 'RESOLVE_LOST_FOUND', payload: { id } });
+      pushToast('Вещь возвращена владельцу', 'Запись закрыта в Бюро находок', 'emerald');
     },
     [pushToast]
   );
@@ -766,6 +970,73 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pushToast, setActiveTab, openCheckOutModal, addLedgerCharge, extendOrMoveStay]
   );
 
+  const upsertGuestProfile = useCallback(
+    (params: UpsertGuestProfilePayload) => {
+      dispatch({ type: 'UPSERT_GUEST_PROFILE', payload: params });
+      pushToast('Профиль гостя обновлён', `${params.fullName} · статус ${params.tag.toUpperCase()}`, 'emerald');
+    },
+    [pushToast]
+  );
+
+  const addMailInquiry = useCallback(
+    (params: Omit<MailInquiry, 'id' | 'propertyId' | 'handled'>) => {
+      dispatch({ type: 'ADD_MAIL_INQUIRY', payload: params });
+      pushToast('Входящее письмо добавлено', `${params.from}: ${params.subject}`, 'cobalt');
+    },
+    [pushToast]
+  );
+
+  const dismissMailInquiry = useCallback(
+    (id: string) => {
+      dispatch({ type: 'DISMISS_MAIL_INQUIRY', payload: { id } });
+      pushToast('Письмо отмечено обработанным', 'Убрано из очереди входящих', 'emerald');
+    },
+    [pushToast]
+  );
+
+  const syncMailInbox = useCallback(async () => {
+    try {
+      const res = await fetch('/api/mail/inbox');
+      if (!res.ok) {
+        pushToast('Почтовый модуль в режиме демо', 'Настройте YANDEX_IMAP_* на сервере для живой синхронизации', 'amber');
+        return;
+      }
+      const data = (await res.json()) as {
+        configured?: boolean;
+        items?: Array<{
+          folder: 'INBOX' | 'Spam';
+          from: string;
+          subject: string;
+          receivedAt: string;
+          snippet: string;
+          category: 'booking' | 'transfer' | 'inquiry';
+          draftReplyRu: string;
+          draftReplyEn: string;
+        }>;
+      };
+      if (!data.configured) {
+        pushToast('Яндекс Почта не подключена', 'Добавьте YANDEX_IMAP_USER и YANDEX_IMAP_PASS в переменные окружения', 'amber');
+        return;
+      }
+      const existingSubjects = new Set((stateRef.current.mailInbox ?? []).map((m) => `${m.from}|${m.subject}`));
+      let added = 0;
+      for (const item of data.items ?? []) {
+        const key = `${item.from}|${item.subject}`;
+        if (!existingSubjects.has(key)) {
+          dispatch({ type: 'ADD_MAIL_INQUIRY', payload: item });
+          added += 1;
+        }
+      }
+      pushToast(
+        'Яндекс Почта проверена',
+        added > 0 ? `Новых обращений (INBOX/Spam): ${added}` : 'Новых непрочитанных заявок нет',
+        'emerald'
+      );
+    } catch {
+      pushToast('Почтовый шлюз недоступен', 'Работаем с локальной лентой писем', 'amber');
+    }
+  }, [pushToast]);
+
   const addPhysicalRoom = useCallback(
     (categoryId: string, customCode?: string) => {
       const cat = stateRef.current.roomCategories.find((c) => c.id === categoryId);
@@ -877,22 +1148,31 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       state,
       storageKind: adapter.kind,
       syncStatusInfo,
+      offlineSyncStatus,
+      flushOfflineQueue,
       checkIn,
       checkOut,
       addLedgerCharge,
       addPayment,
       issueRefund,
       extendOrMoveStay,
+      moveOrResizeSegment,
+      splitStayBooking,
+      completeNightAudit,
       commitParsedCommand,
       toggleChecklistItem,
       startLaundryJob,
       completeLaundryJob,
       speedUpLaundry,
+      startHousekeepingTask,
+      finishHousekeepingTask,
       maidMarkCleaned,
       adminApproveHousekeeping,
       setRoomHousekeepingStatus,
       addLuggageItem,
       releaseLuggageItem,
+      addLostFoundItem,
+      resolveLostFoundItem,
       addTransferJob,
       cycleTransferStatus,
       adjustStock,
@@ -903,6 +1183,10 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       submitGuestQrRequest,
       updateTelegramAlertDraft,
       executeTelegramAction,
+      upsertGuestProfile,
+      addMailInquiry,
+      dismissMailInquiry,
+      syncMailInbox,
       addPhysicalRoom,
       archivePhysicalRoom,
       updateCategoryPrice,
@@ -916,22 +1200,31 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       state,
       adapter.kind,
       syncStatusInfo,
+      offlineSyncStatus,
+      flushOfflineQueue,
       checkIn,
       checkOut,
       addLedgerCharge,
       addPayment,
       issueRefund,
       extendOrMoveStay,
+      moveOrResizeSegment,
+      splitStayBooking,
+      completeNightAudit,
       commitParsedCommand,
       toggleChecklistItem,
       startLaundryJob,
       completeLaundryJob,
       speedUpLaundry,
+      startHousekeepingTask,
+      finishHousekeepingTask,
       maidMarkCleaned,
       adminApproveHousekeeping,
       setRoomHousekeepingStatus,
       addLuggageItem,
       releaseLuggageItem,
+      addLostFoundItem,
+      resolveLostFoundItem,
       addTransferJob,
       cycleTransferStatus,
       adjustStock,
@@ -942,6 +1235,10 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       submitGuestQrRequest,
       updateTelegramAlertDraft,
       executeTelegramAction,
+      upsertGuestProfile,
+      addMailInquiry,
+      dismissMailInquiry,
+      syncMailInbox,
       addPhysicalRoom,
       archivePhysicalRoom,
       updateCategoryPrice,

@@ -169,17 +169,18 @@ export const QrPosterModal: React.FC = () => {
   return (
     <div
       style={{ backgroundColor: 'var(--backdrop-scrim)' }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-xs print:static print:bg-white print:p-0"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-[3px] print:static print:bg-white print:p-0"
       onClick={closeQrPosterModal}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        initial={{ opacity: 0, scale: 0.97, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Печать QR-постера для комнаты"
-        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-xl print:max-w-none print:rounded-none print:border-0 print:bg-white print:shadow-none"
+        style={{ boxShadow: 'var(--shadow-popover)' }}
+        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] print:max-w-none print:rounded-none print:border-0 print:bg-white print:shadow-none"
       >
         {/* Modal Header (hidden in print) */}
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4 print:hidden">

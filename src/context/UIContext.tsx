@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { TabId, ToastItem } from '../types/ops';
+import type { AppUserRole, TabId, ToastItem } from '../types/ops';
 import { makeId, type CheckInPreselect } from '../store/types';
 import { getTashkentTodayIso } from '../utils/time';
 
@@ -32,6 +32,8 @@ export interface UIContextValue {
   theme: UITheme;
   setTheme: (theme: UITheme) => void;
   toggleTheme: () => void;
+  userRole: AppUserRole;
+  setUserRole: (role: AppUserRole) => void;
   activeTab: TabId;
   setActiveTab: (tab: TabId) => void;
   gridViewMode: GridViewMode;
@@ -66,8 +68,18 @@ export interface UIContextValue {
   qrPosterRoomId: string | null;
   openQrPosterModal: (roomId?: string) => void;
   closeQrPosterModal: () => void;
+  nightAuditOpen: boolean;
+  setNightAuditOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  welcomeCardBookingId: string | null;
+  openWelcomeCardModal: (bookingId: string) => void;
+  closeWelcomeCardModal: () => void;
   toasts: ToastItem[];
-  pushToast: (title: string, description?: string, tone?: ToastItem['tone']) => void;
+  pushToast: (
+    title: string,
+    description?: string,
+    tone?: ToastItem['tone'],
+    action?: { label: string; onClick: () => void }
+  ) => void;
   dismissToast: (id: string) => void;
 }
 
@@ -75,6 +87,7 @@ const UIContext = createContext<UIContextValue | null>(null);
 
 export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<UITheme>(() => readInitialTheme());
+  const [userRole, setUserRole] = useState<AppUserRole>('admin');
   const [activeTab, setActiveTab] = useState<TabId>('grid');
   const [gridViewMode, setGridViewMode] = useState<GridViewMode>(() => readInitialGridViewMode());
   const [tapeStartDate, setTapeStartDate] = useState<string>(() => getTashkentTodayIso());
@@ -90,6 +103,8 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [checkInPreselect, setCheckInPreselect] = useState<CheckInPreselect | null>(null);
   const [checkOutBookingId, setCheckOutBookingId] = useState<string | null>(null);
   const [qrPosterRoomId, setQrPosterRoomId] = useState<string | null>(null);
+  const [nightAuditOpen, setNightAuditOpen] = useState<boolean>(false);
+  const [welcomeCardBookingId, setWelcomeCardBookingId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   useEffect(() => {
@@ -128,12 +143,29 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   }, []);
 
   const pushToast = useCallback(
-    (title: string, description?: string, tone: ToastItem['tone'] = 'emerald') => {
+    (
+      title: string,
+      description?: string,
+      tone: ToastItem['tone'] = 'emerald',
+      action?: { label: string; onClick: () => void }
+    ) => {
       const id = makeId('toast');
-      setToasts((prev) => [{ id, title, description, tone }, ...prev].slice(0, 4));
+      setToasts((prev) =>
+        [
+          {
+            id,
+            title,
+            description,
+            tone,
+            actionLabel: action?.label,
+            onAction: action?.onClick,
+          },
+          ...prev,
+        ].slice(0, 4)
+      );
       window.setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 4200);
+      }, action ? 7000 : 4200);
     },
     []
   );
@@ -166,11 +198,21 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setQrPosterRoomId(null);
   }, []);
 
+  const openWelcomeCardModal = useCallback((bookingId: string) => {
+    setWelcomeCardBookingId(bookingId);
+  }, []);
+
+  const closeWelcomeCardModal = useCallback(() => {
+    setWelcomeCardBookingId(null);
+  }, []);
+
   const value = useMemo<UIContextValue>(
     () => ({
       theme,
       setTheme,
       toggleTheme,
+      userRole,
+      setUserRole,
       activeTab,
       setActiveTab,
       gridViewMode,
@@ -205,6 +247,11 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       qrPosterRoomId,
       openQrPosterModal,
       closeQrPosterModal,
+      nightAuditOpen,
+      setNightAuditOpen,
+      welcomeCardBookingId,
+      openWelcomeCardModal,
+      closeWelcomeCardModal,
       toasts,
       pushToast,
       dismissToast,
@@ -213,6 +260,7 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       theme,
       setTheme,
       toggleTheme,
+      userRole,
       activeTab,
       gridViewMode,
       tapeStartDate,
@@ -237,6 +285,10 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       qrPosterRoomId,
       openQrPosterModal,
       closeQrPosterModal,
+      nightAuditOpen,
+      welcomeCardBookingId,
+      openWelcomeCardModal,
+      closeWelcomeCardModal,
       toasts,
       pushToast,
       dismissToast,

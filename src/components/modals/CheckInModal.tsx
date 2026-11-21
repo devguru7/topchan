@@ -14,7 +14,12 @@ import {
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
 import type { CashPocketId, CurrencyCode } from '../../types/ops';
-import { parseTd3Mrz, SAMPLE_MRZ_ITALY, SAMPLE_MRZ_KOREA } from '../../utils/mrz';
+import {
+  parseTd3MrzStrict,
+  SAMPLE_MRZ_FEMALE_DE,
+  SAMPLE_MRZ_ITALY,
+  SAMPLE_MRZ_KOREA,
+} from '../../utils/mrzParser';
 import {
   calcAccommodationUzs,
   calcDualRateChange,
@@ -108,6 +113,7 @@ export const CheckInModal: React.FC = () => {
   const [passportNo, setPassportNo] = useState('');
   const [dob, setDob] = useState('1994-05-15');
   const [age, setAge] = useState(32);
+  const [sex, setSex] = useState<'M' | 'F'>('M');
 
   // Payment
   const [payNow, setPayNow] = useState(true);
@@ -149,6 +155,7 @@ export const CheckInModal: React.FC = () => {
     setCitizenship('ITA');
     setDob('1994-05-15');
     setAge(32);
+    setSex('M');
     setChkOriginalPassport(false);
     setChkVisaChecked(false);
     setChkBnovoPaid(false);
@@ -158,20 +165,25 @@ export const CheckInModal: React.FC = () => {
 
   const mrzParsed = useMemo(() => {
     if (!mrzInput.trim()) return null;
-    return parseTd3Mrz(mrzInput);
+    return parseTd3MrzStrict(mrzInput);
   }, [mrzInput]);
 
   const applyMrzString = (raw: string) => {
     setMrzInput(raw);
-    const res = parseTd3Mrz(raw);
+    const res = parseTd3MrzStrict(raw);
     if (res.valid) {
       setFullName(res.fullName);
       setCitizenship(res.nationality);
       setPassportNo(res.passportNo);
       setDob(res.dob);
       setAge(res.age);
+      setSex(res.sex);
       setChkOriginalPassport(true);
-      pushToast('MRZ распознан', `${res.fullName} · ${res.passportNo} (${res.nationality})`, 'emerald');
+      pushToast(
+        res.checkDigits.allValid ? 'MRZ распознан (ICAO OK)' : 'MRZ распознан (проверьте цифры)',
+        `${res.fullName} · ${res.passportNo} (${res.nationality}, ${res.sex === 'F' ? 'Жен' : 'Муж'})`,
+        res.checkDigits.allValid ? 'emerald' : 'amber'
+      );
     }
   };
 
@@ -214,6 +226,11 @@ export const CheckInModal: React.FC = () => {
   };
 
   const selectedOption = allRoomOptions.find((o) => o.key === selectedKey);
+  const selectedCategory = useMemo(
+    () => state.roomCategories.find((c) => c.id === selectedOption?.categoryId),
+    [state.roomCategories, selectedOption?.categoryId]
+  );
+  const isFemaleOnlyViolation = Boolean(selectedCategory?.femaleOnly && sex === 'M');
   const toDate = addDaysIso(fromDate, Math.max(1, nights));
 
   const conflicts = useMemo(() => {
@@ -312,20 +329,30 @@ export const CheckInModal: React.FC = () => {
   const allChecked = checkedCount === checklistItems.length;
 
   const guestStepValid = fullName.trim().length >= 2 && passportNo.trim().length >= 4;
-  const roomStepValid = Boolean(selectedOption && conflicts.length === 0);
+  const roomStepValid = Boolean(selectedOption && conflicts.length === 0 && !isFemaleOnlyViolation);
   const canSubmit = guestStepValid && roomStepValid && allChecked;
 
   const blockerReason = useMemo(() => {
     if (fullName.trim().length < 2) return 'Укажите ФИО гостя на шаге 1';
     if (passportNo.trim().length < 4) return 'Укажите номер паспорта (минимум 4 символа) на шаге 1';
     if (!selectedOption) return 'Выберите комнату или койку на шаге 2';
+    if (isFemaleOnlyViolation) return 'Fem Dorm — женский дорм: выберите Mix/Six дорм или приватную комнату';
     if (conflicts.length > 0) return 'Выбранная комната занята на эти даты — выберите свободную';
     if (!allChecked) {
       const remaining = checklistItems.length - checkedCount;
       return `Отметьте оставшиеся пункты протокола (${remaining})`;
     }
     return null;
-  }, [fullName, passportNo, selectedOption, conflicts.length, allChecked, checklistItems.length, checkedCount]);
+  }, [
+    fullName,
+    passportNo,
+    selectedOption,
+    isFemaleOnlyViolation,
+    conflicts.length,
+    allChecked,
+    checklistItems.length,
+    checkedCount,
+  ]);
 
   const emehmonGuestDataText = useMemo(
     () =>
@@ -376,6 +403,7 @@ export const CheckInModal: React.FC = () => {
           age: Math.max(0, age),
           passportNo: passportNo.trim().toUpperCase(),
           dob,
+          sex,
           isForeigner: normalizedCitizenship !== 'UZB',
           mrzRaw: mrzInput.trim() || undefined,
           emehmonRegistered: chkEmehmonDone,
@@ -412,11 +440,12 @@ export const CheckInModal: React.FC = () => {
             initial={{ opacity: 0, y: 14, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Заселение гостя"
-            className="w-full max-w-3xl rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+            style={{ boxShadow: 'var(--shadow-popover)' }}
+            className="w-full max-w-3xl rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] overflow-hidden my-auto max-h-[92vh] flex flex-col"
           >
             {/* Header + 3-Step Bar */}
             <div className="px-5 py-4 border-b border-[var(--border-subtle)] space-y-3.5 shrink-0">
@@ -530,6 +559,13 @@ export const CheckInModal: React.FC = () => {
                           >
                             Тест: Корея
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => applyMrzString(SAMPLE_MRZ_FEMALE_DE)}
+                            className="px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] border border-[var(--border-subtle)] transition-colors"
+                          >
+                            Тест: ФРГ (Ж)
+                          </button>
                         </div>
                       </div>
 
@@ -540,13 +576,14 @@ export const CheckInModal: React.FC = () => {
                         onChange={(e) => {
                           const v = e.target.value;
                           setMrzInput(v);
-                          const res = parseTd3Mrz(v);
+                          const res = parseTd3MrzStrict(v);
                           if (res.valid) {
                             setFullName(res.fullName);
                             setCitizenship(res.nationality);
                             setPassportNo(res.passportNo);
                             setDob(res.dob);
                             setAge(res.age);
+                            setSex(res.sex);
                           }
                         }}
                         placeholder="Вставьте 2 строки MRZ из паспорта (например P<ITAROSSI<<MARCO...)"
@@ -563,17 +600,41 @@ export const CheckInModal: React.FC = () => {
                       </div>
 
                       {mrzParsed && (
-                        <div
-                          className="text-xs font-medium"
-                          style={{
-                            color: mrzParsed.valid
-                              ? 'var(--tone-emerald-fg)'
-                              : 'var(--tone-amber-fg)',
-                          }}
-                        >
-                          {mrzParsed.valid
-                            ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · Паспорт ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ДР ${mrzParsed.dob} (${mrzParsed.age} лет)`
-                            : mrzParsed.error}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span
+                            className="font-medium"
+                            style={{
+                              color: mrzParsed.valid
+                                ? 'var(--tone-emerald-fg)'
+                                : 'var(--tone-amber-fg)',
+                            }}
+                          >
+                            {mrzParsed.valid
+                              ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ${mrzParsed.sex === 'F' ? 'Жен' : 'Муж'} · ДР ${mrzParsed.dob}`
+                              : mrzParsed.error}
+                          </span>
+                          {mrzParsed.valid && (
+                            <span
+                              className="px-2 py-0.5 rounded-md border font-mono text-[11px] font-semibold"
+                              style={
+                                mrzParsed.checkDigits.allValid
+                                  ? {
+                                      backgroundColor: 'var(--tone-emerald-bg)',
+                                      borderColor: 'var(--tone-emerald-border)',
+                                      color: 'var(--tone-emerald-fg)',
+                                    }
+                                  : {
+                                      backgroundColor: 'var(--tone-amber-bg)',
+                                      borderColor: 'var(--tone-amber-border)',
+                                      color: 'var(--tone-amber-fg)',
+                                    }
+                              }
+                            >
+                              {mrzParsed.checkDigits.allValid
+                                ? 'ICAO 9303: контрольные цифры OK'
+                                : 'ICAO 9303: сверьте номер/даты вручную'}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -648,20 +709,35 @@ export const CheckInModal: React.FC = () => {
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
-                          Источник брони
-                        </label>
-                        <select
-                          value={source}
-                          onChange={(e) => setSource(e.target.value as typeof source)}
-                          className="ops-input w-full px-3 py-2.5 text-sm"
-                        >
-                          <option value="Bnovo">Bnovo</option>
-                          <option value="Walk-in">С улицы (Walk-in)</option>
-                          <option value="QR Direct">QR Прямая бронь</option>
-                          <option value="Telegram">Telegram</option>
-                        </select>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Пол (для Fem Dorm)
+                          </label>
+                          <select
+                            value={sex}
+                            onChange={(e) => setSex(e.target.value as 'M' | 'F')}
+                            className="ops-input w-full px-3 py-2.5 text-sm"
+                          >
+                            <option value="M">Мужской (M)</option>
+                            <option value="F">Женский (F)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Источник брони
+                          </label>
+                          <select
+                            value={source}
+                            onChange={(e) => setSource(e.target.value as typeof source)}
+                            className="ops-input w-full px-3 py-2.5 text-sm"
+                          >
+                            <option value="Bnovo">Bnovo</option>
+                            <option value="Walk-in">С улицы (Walk-in)</option>
+                            <option value="QR Direct">QR Прямая бронь</option>
+                            <option value="Telegram">Telegram</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -743,6 +819,31 @@ export const CheckInModal: React.FC = () => {
                         />
                       </div>
                     </div>
+
+                    {/* Female-Only Dorm Guard */}
+                    {isFemaleOnlyViolation && (
+                      <div
+                        className="rounded-2xl border p-4 flex items-start gap-2.5 text-xs"
+                        style={{
+                          backgroundColor: 'var(--tone-rose-bg)',
+                          borderColor: 'var(--tone-rose-border)',
+                        }}
+                      >
+                        <AlertTriangle
+                          className="w-4 h-4 shrink-0 mt-0.5"
+                          strokeWidth={1.75}
+                          style={{ color: 'var(--tone-rose-fg)' }}
+                        />
+                        <div>
+                          <p className="font-semibold" style={{ color: 'var(--tone-rose-fg)' }}>
+                            Заселение заблокировано: Fem Dorm — строго женский дорм
+                          </p>
+                          <p className="mt-1 text-[var(--text-secondary)]">
+                            Гость указан как «Мужской (M)». Выберите койку в Mix Dorm, Six Dorm или приватную комнату.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Overbooking Conflict Guard */}
                     {conflicts.length > 0 && (

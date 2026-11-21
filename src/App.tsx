@@ -4,29 +4,36 @@ import {
   AlertCircle,
   ArrowRight,
   Banknote,
-  BedDouble,
   Bot,
+  Brush,
   CalendarRange,
   CheckCircle2,
   Chrome,
   Clock,
+  CloudOff,
   Command,
   Moon,
   Plus,
   Search,
-  Sparkles,
   Sun,
+  Users,
   WashingMachine,
 } from 'lucide-react';
 import { OpsProvider, useOps, useTimers } from './context/OpsContext';
-import type { TabId } from './types/ops';
+import type { AppUserRole, TabId } from './types/ops';
 import { calcBookingTotals } from './utils/math';
+import { SPRING_SNAPPY } from './utils/motion';
+import { TopchanMark } from './components/ui';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastStack } from './components/ToastStack';
 import { CommandPalette } from './components/CommandPalette';
 import { ChromeSidePanel } from './components/ChromeSidePanel';
 import { QrPosterModal } from './components/QrPosterModal';
 import { GuestStandaloneView } from './components/GuestStandaloneView';
+import { AuthGate } from './components/AuthGate';
+import { NightAuditModal } from './components/NightAuditModal';
+import { WelcomeCardModal } from './components/WelcomeCardModal';
+import { HousekeepingBoard } from './components/HousekeepingBoard';
 import { GuestFolioDrawer } from './components/modals/GuestFolioDrawer';
 import { CheckInModal } from './components/modals/CheckInModal';
 import { CheckOutModal } from './components/modals/CheckOutModal';
@@ -34,6 +41,7 @@ import { GridTab } from './components/tabs/GridTab';
 import { ShiftTab } from './components/tabs/ShiftTab';
 import { CashTab } from './components/tabs/CashTab';
 import { ServicesTab } from './components/tabs/ServicesTab';
+import { GuestsTab } from './components/tabs/GuestsTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 
 /**
@@ -71,8 +79,15 @@ const NAV_ITEMS: Array<{
   { id: 'shift', shortcut: '2', label: 'Смена и E-mehmon', shortLabel: 'Смена', icon: Clock },
   { id: 'cash', shortcut: '3', label: 'Касса и Сейф', shortLabel: 'Касса', icon: Banknote },
   { id: 'services', shortcut: '4', label: 'Сервисы и Уборка', shortLabel: 'Сервисы', icon: WashingMachine },
-  { id: 'settings', shortcut: '5', label: 'Настройки и Бот', shortLabel: 'Настройки', icon: Bot },
+  { id: 'guests', shortcut: '5', label: 'Гости и CRM', shortLabel: 'Гости', icon: Users },
+  { id: 'settings', shortcut: '6', label: 'Настройки и Бот', shortLabel: 'Настройки', icon: Bot },
 ];
+
+const ROLE_LABELS: Record<AppUserRole, string> = {
+  admin: 'Админ',
+  manager: 'Менеджер',
+  housekeeping: 'Горничная',
+};
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -87,8 +102,12 @@ const OpsWorkspace: React.FC = () => {
     state,
     storageKind,
     syncStatusInfo,
+    offlineSyncStatus,
+    flushOfflineQueue,
     theme,
     toggleTheme,
+    userRole,
+    setUserRole,
     activeTab,
     setActiveTab,
     setGridFilter,
@@ -99,6 +118,10 @@ const OpsWorkspace: React.FC = () => {
     setSidePanelOpen,
     commandPaletteOpen,
     setCommandPaletteOpen,
+    nightAuditOpen,
+    setNightAuditOpen,
+    welcomeCardBookingId,
+    closeWelcomeCardModal,
     selectedBookingId,
     setSelectedBookingId,
     checkInPreselect,
@@ -110,9 +133,10 @@ const OpsWorkspace: React.FC = () => {
     closeQrPosterModal,
   } = useOps();
 
-  // Desktop Keyboard Power Mode: Cmd/Ctrl+K, 1-5 tabs, N quick check-in, Esc close overlays
+  // Desktop Keyboard Power Mode: Cmd/Ctrl+K, 1-6 tabs, N quick check-in, Esc close overlays
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (userRole === 'housekeeping') return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setCommandPaletteOpen((open) => !open);
@@ -122,6 +146,10 @@ const OpsWorkspace: React.FC = () => {
       if (e.key === 'Escape') {
         if (commandPaletteOpen) {
           setCommandPaletteOpen(false);
+        } else if (nightAuditOpen) {
+          setNightAuditOpen(false);
+        } else if (welcomeCardBookingId) {
+          closeWelcomeCardModal();
         } else if (checkOutBookingId) {
           closeCheckOutModal();
         } else if (checkInPreselect !== null) {
@@ -140,6 +168,8 @@ const OpsWorkspace: React.FC = () => {
       if (isTypingTarget(e.target)) return;
       if (
         commandPaletteOpen ||
+        nightAuditOpen ||
+        welcomeCardBookingId !== null ||
         checkInPreselect !== null ||
         checkOutBookingId !== null ||
         qrPosterRoomId !== null
@@ -152,7 +182,8 @@ const OpsWorkspace: React.FC = () => {
       else if (key === '2') setActiveTab('shift');
       else if (key === '3') setActiveTab('cash');
       else if (key === '4') setActiveTab('services');
-      else if (key === '5') setActiveTab('settings');
+      else if (key === '5') setActiveTab('guests');
+      else if (key === '6') setActiveTab('settings');
       else if (key === 'n' || key === 'т') {
         e.preventDefault();
         openCheckInModal();
@@ -162,13 +193,18 @@ const OpsWorkspace: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    userRole,
     commandPaletteOpen,
+    nightAuditOpen,
+    welcomeCardBookingId,
     checkInPreselect,
     checkOutBookingId,
     qrPosterRoomId,
     selectedBookingId,
     sidePanelOpen,
     setCommandPaletteOpen,
+    setNightAuditOpen,
+    closeWelcomeCardModal,
     closeCheckOutModal,
     closeCheckInModal,
     closeQrPosterModal,
@@ -277,27 +313,98 @@ const OpsWorkspace: React.FC = () => {
     setServicesSubTab,
   ]);
 
-  // Sync status visual label
+  // Sync status visual label (including offline mutation queue)
   const syncDisplay = useMemo(() => {
+    if (!offlineSyncStatus.isOnline || offlineSyncStatus.pendingCount > 0) {
+      return {
+        label: !offlineSyncStatus.isOnline
+          ? `Офлайн · ${offlineSyncStatus.pendingCount}`
+          : `Очередь · ${offlineSyncStatus.pendingCount}`,
+        color: 'var(--tone-amber-fg)',
+        bg: 'var(--tone-amber-bg)',
+        isOfflineOrQueued: true,
+      };
+    }
     if (syncStatusInfo.status === 'conflict') {
-      return { label: 'Конфликт', color: 'var(--tone-rose-fg)', bg: 'var(--tone-rose-bg)' };
+      return {
+        label: 'Конфликт',
+        color: 'var(--tone-rose-fg)',
+        bg: 'var(--tone-rose-bg)',
+        isOfflineOrQueued: false,
+      };
     }
     if (syncStatusInfo.status === 'syncing') {
-      return { label: 'Синхр...', color: 'var(--tone-amber-fg)', bg: 'var(--tone-amber-bg)' };
+      return {
+        label: 'Синхр...',
+        color: 'var(--tone-amber-fg)',
+        bg: 'var(--tone-amber-bg)',
+        isOfflineOrQueued: false,
+      };
     }
     if (storageKind === 'supabase' && syncStatusInfo.status === 'synced') {
       return {
         label: 'Облако',
         color: 'var(--tone-emerald-fg)',
         bg: 'var(--tone-emerald-bg)',
+        isOfflineOrQueued: false,
       };
     }
     return {
       label: 'Локально',
       color: 'var(--tone-emerald-fg)',
       bg: 'var(--bg-elevated)',
+      isOfflineOrQueued: false,
     };
-  }, [storageKind, syncStatusInfo.status]);
+  }, [storageKind, syncStatusInfo.status, offlineSyncStatus.isOnline, offlineSyncStatus.pendingCount]);
+
+  // Dedicated mobile-first Housekeeping Shell when role is 'housekeeping'
+  if (userRole === 'housekeeping') {
+    return (
+      <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col">
+        <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <TopchanMark size={28} className="shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-bold tracking-tight text-[var(--text-primary)] truncate">
+                Topchan · Уборка
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)]">
+                Режим горничной
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label="Переключить тему"
+              className="w-10 h-10 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-secondary)]"
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4" strokeWidth={1.75} />
+              ) : (
+                <Moon className="w-4 h-4" strokeWidth={1.75} />
+              )}
+            </button>
+            <button
+              type="button"
+              data-testid="role-switch-admin"
+              onClick={() => setUserRole('admin')}
+              className="h-10 px-3 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)]"
+            >
+              Ресепшн →
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-5">
+          <HousekeepingBoard />
+        </main>
+        <ToastStack />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col lg:flex-row">
@@ -316,9 +423,7 @@ const OpsWorkspace: React.FC = () => {
           className="px-4 h-16 border-b flex items-center gap-3"
           style={{ borderColor: 'var(--sidebar-border)' }}
         >
-          <div className="w-9 h-9 rounded-xl bg-[#2563EB] flex items-center justify-center text-white shrink-0 shadow-sm">
-            <BedDouble className="w-4 h-4" strokeWidth={1.75} />
-          </div>
+          <TopchanMark size={32} className="shrink-0" />
           <div className="min-w-0">
             <div className="text-sm font-bold tracking-tight text-white truncate">
               Topchan Ops
@@ -381,8 +486,8 @@ const OpsWorkspace: React.FC = () => {
                     <span
                       className={`font-mono tabular-nums text-xs font-bold px-1.5 py-0.5 rounded-md leading-none ${
                         isDangerBadge
-                          ? 'bg-[#DC2626] text-white'
-                          : 'bg-[#2563EB] text-white'
+                          ? 'bg-[#B91C1C] text-white'
+                          : 'bg-[var(--brand-primary)] text-white'
                       }`}
                     >
                       {badgeCount}
@@ -404,9 +509,9 @@ const OpsWorkspace: React.FC = () => {
           })}
         </nav>
 
-        {/* Sidebar Footer: Shift Admin + 1-Click Night Shift Toggle */}
+        {/* Sidebar Footer: Night Audit + Role Switcher + 1-Click Night Shift Toggle */}
         <div
-          className="p-3.5 border-t space-y-3"
+          className="p-3.5 border-t space-y-2.5"
           style={{ borderColor: 'var(--sidebar-border)' }}
         >
           <div className="px-1 space-y-1 text-xs">
@@ -417,15 +522,44 @@ const OpsWorkspace: React.FC = () => {
               </span>
             </div>
             <div className="flex items-center justify-between gap-2">
-              <span style={{ color: 'var(--sidebar-muted)' }}>Быстрый заезд</span>
-              <kbd
-                className="px-1.5 py-0.5 rounded font-mono text-xs text-white"
-                style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
-              >
-                N
-              </kbd>
+              <span style={{ color: 'var(--sidebar-muted)' }}>Роль</span>
+              <div className="inline-flex rounded-lg p-0.5 gap-0.5" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+                {(['admin', 'manager', 'housekeeping'] as AppUserRole[]).map((role) => (
+                  <button
+                    key={role}
+                    type="button"
+                    data-testid={`sidebar-role-${role}`}
+                    onClick={() => setUserRole(role)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                      userRole === role
+                        ? 'bg-[var(--brand-primary)] text-white'
+                        : 'text-[var(--sidebar-muted)] hover:text-white'
+                    }`}
+                  >
+                    {ROLE_LABELS[role]}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            data-testid="sidebar-night-audit-btn"
+            onClick={() => setNightAuditOpen(true)}
+            className="w-full h-9 px-3 rounded-xl flex items-center justify-between gap-2 text-xs font-semibold transition-colors border"
+            style={{
+              backgroundColor: 'rgba(196, 98, 45, 0.16)',
+              borderColor: 'rgba(196, 98, 45, 0.35)',
+              color: '#FDE8D7',
+            }}
+          >
+            <span className="inline-flex items-center gap-2 truncate">
+              <Moon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">Ночной аудит</span>
+            </span>
+            <span className="font-mono text-[10px] opacity-80">00:00</span>
+          </button>
 
           <button
             type="button"
@@ -470,7 +604,8 @@ const OpsWorkspace: React.FC = () => {
         <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-3 no-print">
           {/* Left: Brand (on mobile) + Live Tashkent Clock + CBU Rate */}
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <span className="lg:hidden text-sm font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0">
+            <span className="lg:hidden inline-flex items-center gap-2 text-sm font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0">
+              <TopchanMark size={24} className="shrink-0" />
               Topchan Ops
             </span>
             <TashkentClock />
@@ -508,19 +643,43 @@ const OpsWorkspace: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setSettingsSubTab('integrations');
-                setActiveTab('settings');
+                if (syncDisplay.isOfflineOrQueued) {
+                  void flushOfflineQueue();
+                } else {
+                  setSettingsSubTab('integrations');
+                  setActiveTab('settings');
+                }
               }}
-              title={`Хранилище: ${syncDisplay.label} · Версия #${state.revision ?? 1}`}
+              title={
+                syncDisplay.isOfflineOrQueued
+                  ? 'Нажмите, чтобы синхронизировать офлайн-очередь'
+                  : `Хранилище: ${syncDisplay.label} · Версия #${state.revision ?? 1}`
+              }
               className="hidden xl:inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-[var(--border-subtle)] text-xs font-medium whitespace-nowrap transition-colors hover:border-[var(--border-strong)]"
               style={{ backgroundColor: syncDisplay.bg, color: syncDisplay.color }}
             >
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: syncDisplay.color }}
-                aria-hidden="true"
-              />
+              {syncDisplay.isOfflineOrQueued ? (
+                <CloudOff className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+              ) : (
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: syncDisplay.color }}
+                  aria-hidden="true"
+                />
+              )}
               <span>{syncDisplay.label}</span>
+            </button>
+
+            {/* Mobile/Tablet Role Quick Switch to Housekeeping */}
+            <button
+              type="button"
+              data-testid="mobile-housekeeping-toggle"
+              onClick={() => setUserRole('housekeeping')}
+              aria-label="Перейти в режим горничной"
+              title="Режим горничной"
+              className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] transition-colors shrink-0"
+            >
+              <Brush className="w-4 h-4" strokeWidth={1.75} />
             </button>
 
             {/* Mobile/Tablet Night Shift Toggle (desktop toggle lives in sidebar) */}
@@ -567,7 +726,7 @@ const OpsWorkspace: React.FC = () => {
             <button
               type="button"
               onClick={() => openCheckInModal()}
-              className="inline-flex items-center gap-1.5 h-10 px-3.5 sm:px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold transition-colors shadow-sm whitespace-nowrap shrink-0"
+              className="ops-brand-btn inline-flex items-center gap-1.5 h-10 px-3.5 sm:px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0"
             >
               <Plus className="w-4 h-4 shrink-0" strokeWidth={2} />
               <span className="hidden sm:inline">Новое заселение</span>
@@ -603,7 +762,7 @@ const OpsWorkspace: React.FC = () => {
                   style={{ color: 'var(--tone-rose-fg)' }}
                 />
               ) : shiftFocus.tone === 'amber' ? (
-                <Sparkles
+                <Brush
                   className="w-4 h-4 shrink-0"
                   strokeWidth={1.75}
                   style={{ color: 'var(--tone-amber-fg)' }}
@@ -659,6 +818,7 @@ const OpsWorkspace: React.FC = () => {
               {activeTab === 'shift' && <ShiftTab />}
               {activeTab === 'cash' && <CashTab />}
               {activeTab === 'services' && <ServicesTab />}
+              {activeTab === 'guests' && <GuestsTab />}
               {activeTab === 'settings' && <SettingsTab />}
             </motion.div>
           </div>
@@ -672,7 +832,7 @@ const OpsWorkspace: React.FC = () => {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 344, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            transition={SPRING_SNAPPY}
             className="hidden lg:block shrink-0 h-screen sticky top-0 overflow-hidden no-print"
           >
             <div className="w-[344px] h-full">
@@ -703,10 +863,10 @@ const OpsWorkspace: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Mobile Fixed 5-Tab Bottom Navigation Bar (< 1024px) with >= 44px tap targets */}
+      {/* Mobile Fixed 6-Tab Bottom Navigation Bar (< 1024px) with >= 44px tap targets */}
       <nav
         aria-label="Мобильная навигация"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--bg-surface)]/95 backdrop-blur-md border-t border-[var(--border-subtle)] grid grid-cols-5 px-1 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] no-print"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--bg-surface)]/95 backdrop-blur-md border-t border-[var(--border-subtle)] grid grid-cols-6 px-1 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] no-print"
       >
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
@@ -716,8 +876,8 @@ const OpsWorkspace: React.FC = () => {
               key={item.id}
               type="button"
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center justify-center gap-0.5 min-h-[48px] rounded-xl text-xs font-medium transition-colors ${
-                active ? 'text-[#2563EB] font-semibold' : 'text-[var(--text-muted)]'
+              className={`relative flex flex-col items-center justify-center gap-0.5 min-h-[48px] rounded-xl text-[11px] font-medium transition-colors ${
+                active ? 'text-[var(--brand-primary)] font-semibold' : 'text-[var(--text-muted)]'
               }`}
             >
               <Icon className="w-4 h-4" strokeWidth={1.75} />
@@ -731,6 +891,8 @@ const OpsWorkspace: React.FC = () => {
       <GuestFolioDrawer />
       <CheckInModal />
       <CheckOutModal />
+      <NightAuditModal />
+      <WelcomeCardModal />
       <QrPosterModal />
       <CommandPalette />
       <ToastStack />
@@ -750,7 +912,13 @@ export default function App() {
     <ErrorBoundary>
       <MotionConfig reducedMotion="user">
         <OpsProvider>
-          {isGuestMode ? <GuestStandaloneView roomParam={roomParam} /> : <OpsWorkspace />}
+          {isGuestMode ? (
+            <GuestStandaloneView roomParam={roomParam} />
+          ) : (
+            <AuthGate>
+              <OpsWorkspace />
+            </AuthGate>
+          )}
         </OpsProvider>
       </MotionConfig>
     </ErrorBoundary>

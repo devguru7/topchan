@@ -130,6 +130,16 @@
     ]);
     if (setNativeValue(checkOutEl, guest.checkOutDate)) filledCount++;
 
+    if (guest.roomCode) {
+      const roomEl = findInput([
+        'input[name*="room" i]',
+        'input[id*="room" i]',
+        'input[placeholder*="Комната" i]',
+        'input[placeholder*="Номер" i]',
+      ]);
+      if (setNativeValue(roomEl, guest.roomCode)) filledCount++;
+    }
+
     return filledCount;
   }
 

@@ -14,38 +14,55 @@
   --color-ink: var(--text-primary);
   --color-ink-secondary: var(--text-secondary);
   --color-ink-muted: var(--text-muted);
+  --color-brand: var(--brand-primary);
 }
 
 /* ============================================================================
- * Crisp Daylight Hospitality Mode (Default) — Bnovo / Cloudbeds / E-mehmon PMS
+ * TOPCHAN CRAFT — Daylight Craft Mode (Default)
+ * Warm Tashkent Alabaster + Deep Obsidian Rail + Tashkent Terracotta Accent
  * ============================================================================ */
 :root,
 [data-theme="light"] {
-  --bg-canvas: #F3F5F8;
+  --bg-canvas: #F6F5F1;
   --bg-surface: #FFFFFF;
-  --bg-elevated: #F8FAFC;
-  --bg-hover: #EEF2F6;
-  --border-subtle: #E2E8F0;
-  --border-strong: #CBD5E1;
-  --text-primary: #0F172A;
-  --text-secondary: #475569;
-  --text-muted: #64748B;
+  --bg-surface-subtle: #FAF9F6;
+  --bg-elevated: #FAF9F6;
+  --bg-hover: #F0EEE8;
+  --bg-rail: #131A26;
 
-  /* Hospitality Navy Left Rail */
-  --sidebar-bg: #162032;
-  --sidebar-surface: #1D2A40;
-  --sidebar-border: rgba(255, 255, 255, 0.09);
-  --sidebar-text: #CBD5E1;
-  --sidebar-muted: #94A3B8;
-  --sidebar-hover: rgba(255, 255, 255, 0.07);
-  --sidebar-active-bg: rgba(59, 130, 246, 0.18);
-  --sidebar-active-border: #2563EB;
+  --border-subtle: #E7E5DF;
+  --border-strong: #D4D1C8;
+
+  --text-primary: #14171F;
+  --text-secondary: #4B5262;
+  --text-muted: #767D8D;
+
+  /* Topchan Craft Brand Accent — Tashkent Terracotta */
+  --brand-primary: #C2592B;
+  --brand-primary-hover: #A84A20;
+  --brand-primary-soft: rgba(194, 89, 43, 0.11);
+
+  /* Semantic Status Accents */
+  --status-inhouse: #0F766E;
+  --status-confirmed: #1D4ED8;
+  --status-checkout: #B45309;
+  --status-debt: #B91C1C;
+
+  /* Deep Obsidian Left Rail */
+  --sidebar-bg: #131A26;
+  --sidebar-surface: #1B2434;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-text: #D1D6E0;
+  --sidebar-muted: #8E97A8;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: rgba(194, 89, 43, 0.22);
+  --sidebar-active-border: #C2592B;
   --sidebar-active-text: #FFFFFF;
 
-  /* Semantic tokens (WCAG AA+ on light surfaces) */
-  --tone-emerald-fg: #15803D;
-  --tone-emerald-bg: #ECFDF5;
-  --tone-emerald-border: #A7F3D0;
+  /* Semantic tone tokens (WCAG AA+ on Daylight Craft surfaces) */
+  --tone-emerald-fg: #0F766E;
+  --tone-emerald-bg: #ECFDF8;
+  --tone-emerald-border: #99E6D8;
 
   --tone-amber-fg: #B45309;
   --tone-amber-bg: #FFFBEB;
@@ -59,95 +76,114 @@
   --tone-cobalt-bg: #EFF6FF;
   --tone-cobalt-border: #BFDBFE;
 
-  /* Standard PMS Tape Chart Booking Bar Palette (Daylight) */
-  --pms-paid-bg: #DCFCE7;
-  --pms-paid-border: #16A34A;
-  --pms-paid-text: #14532D;
+  /* Topchan Craft Tape Chart Booking Bar Palette (Daylight) */
+  --pms-paid-bg: #E6F7F4;
+  --pms-paid-border: #0F766E;
+  --pms-paid-text: #0C4F4A;
 
-  --pms-confirmed-bg: #DBEAFE;
-  --pms-confirmed-border: #2563EB;
+  --pms-confirmed-bg: #E8F0FE;
+  --pms-confirmed-border: #1D4ED8;
   --pms-confirmed-text: #1E3A8A;
 
   --pms-checkout-bg: #FEF3C7;
-  --pms-checkout-border: #D97706;
+  --pms-checkout-border: #B45309;
   --pms-checkout-text: #78350F;
 
   --pms-alert-bg: #FEE2E2;
-  --pms-alert-border: #DC2626;
+  --pms-alert-border: #B91C1C;
   --pms-alert-text: #7F1D1D;
 
-  --pms-archived-bg: #F1F5F9;
-  --pms-archived-border: #94A3B8;
-  --pms-archived-text: #475569;
+  --pms-archived-bg: #F2F1EC;
+  --pms-archived-border: #949BA8;
+  --pms-archived-text: #4B5262;
 
-  --backdrop-scrim: rgba(15, 23, 42, 0.45);
-  --scrollbar-thumb: rgba(15, 23, 42, 0.18);
-  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.30);
+  /* Calibrated Hairline Elevation (No shadow-xl / shadow-2xl) */
+  --shadow-card: 0 1px 2px rgba(20, 23, 31, 0.04), 0 1px 1px rgba(20, 23, 31, 0.02);
+  --shadow-popover: 0 10px 28px -6px rgba(20, 23, 31, 0.14), 0 2px 6px rgba(20, 23, 31, 0.06);
+
+  --backdrop-scrim: rgba(19, 26, 38, 0.42);
+  --scrollbar-thumb: rgba(20, 23, 31, 0.16);
+  --scrollbar-thumb-hover: rgba(20, 23, 31, 0.28);
   color-scheme: light;
 }
 
 /* ============================================================================
- * Night Shift Dark Mode — Calm low-glare console for 00:00–07:00 shifts
+ * TOPCHAN CRAFT — Night Shift Craft Mode (00:00–07:00 low-glare desk)
  * ============================================================================ */
 [data-theme="dark"] {
-  --bg-canvas: #0B111E;
-  --bg-surface: #131B2E;
-  --bg-elevated: #1A243B;
-  --bg-hover: #222F4B;
+  --bg-canvas: #0D1117;
+  --bg-surface: #141A23;
+  --bg-surface-subtle: #1A222E;
+  --bg-elevated: #1A222E;
+  --bg-hover: #222C3B;
+  --bg-rail: #090C11;
+
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
-  --text-primary: #F8FAFC;
-  --text-secondary: #CBD5E1;
-  --text-muted: #94A3B8;
 
-  /* Hospitality Navy Left Rail (Dark shift harmony) */
-  --sidebar-bg: #0F172A;
-  --sidebar-surface: #162032;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-text: #CBD5E1;
-  --sidebar-muted: #94A3B8;
-  --sidebar-hover: rgba(255, 255, 255, 0.06);
-  --sidebar-active-bg: rgba(59, 130, 246, 0.22);
-  --sidebar-active-border: #3B82F6;
+  --text-primary: #F2F4F8;
+  --text-secondary: #B8C0CC;
+  --text-muted: #7C8798;
+
+  /* Warm Terracotta Accent tuned for Night Shift legibility */
+  --brand-primary: #E07A4B;
+  --brand-primary-hover: #EA8B5F;
+  --brand-primary-soft: rgba(224, 122, 75, 0.16);
+
+  --status-inhouse: #2DD4BF;
+  --status-confirmed: #60A5FA;
+  --status-checkout: #FBBF24;
+  --status-debt: #FB7185;
+
+  --sidebar-bg: #090C11;
+  --sidebar-surface: #141A23;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-text: #C9D1DC;
+  --sidebar-muted: #7C8798;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active-bg: rgba(224, 122, 75, 0.18);
+  --sidebar-active-border: #E07A4B;
   --sidebar-active-text: #FFFFFF;
 
-  /* Semantic tokens (WCAG AA+ on dark surfaces) */
-  --tone-emerald-fg: #34D399;
-  --tone-emerald-bg: rgba(16, 185, 129, 0.14);
-  --tone-emerald-border: rgba(16, 185, 129, 0.32);
+  --tone-emerald-fg: #2DD4BF;
+  --tone-emerald-bg: rgba(45, 212, 191, 0.13);
+  --tone-emerald-border: rgba(45, 212, 191, 0.30);
 
   --tone-amber-fg: #FBBF24;
-  --tone-amber-bg: rgba(245, 158, 11, 0.14);
-  --tone-amber-border: rgba(245, 158, 11, 0.34);
+  --tone-amber-bg: rgba(251, 191, 36, 0.13);
+  --tone-amber-border: rgba(251, 191, 36, 0.32);
 
   --tone-rose-fg: #FB7185;
-  --tone-rose-bg: rgba(244, 63, 94, 0.15);
-  --tone-rose-border: rgba(244, 63, 94, 0.36);
+  --tone-rose-bg: rgba(251, 113, 133, 0.14);
+  --tone-rose-border: rgba(251, 113, 133, 0.34);
 
   --tone-cobalt-fg: #60A5FA;
-  --tone-cobalt-bg: rgba(59, 130, 246, 0.16);
-  --tone-cobalt-border: rgba(59, 130, 246, 0.36);
+  --tone-cobalt-bg: rgba(96, 165, 250, 0.15);
+  --tone-cobalt-border: rgba(96, 165, 250, 0.34);
 
-  /* Standard PMS Tape Chart Booking Bar Palette (Night Shift) */
-  --pms-paid-bg: rgba(22, 163, 74, 0.22);
-  --pms-paid-border: #22C55E;
-  --pms-paid-text: #BBF7D0;
+  /* Topchan Craft Tape Chart Booking Bar Palette (Night Shift) */
+  --pms-paid-bg: rgba(15, 118, 110, 0.26);
+  --pms-paid-border: #2DD4BF;
+  --pms-paid-text: #CCFBF1;
 
-  --pms-confirmed-bg: rgba(37, 99, 235, 0.24);
-  --pms-confirmed-border: #3B82F6;
-  --pms-confirmed-text: #BFDBFE;
+  --pms-confirmed-bg: rgba(29, 78, 216, 0.25);
+  --pms-confirmed-border: #60A5FA;
+  --pms-confirmed-text: #DBEAFE;
 
-  --pms-checkout-bg: rgba(217, 119, 6, 0.24);
-  --pms-checkout-border: #F59E0B;
-  --pms-checkout-text: #FDE68A;
+  --pms-checkout-bg: rgba(180, 83, 9, 0.26);
+  --pms-checkout-border: #FBBF24;
+  --pms-checkout-text: #FEF3C7;
 
-  --pms-alert-bg: rgba(220, 38, 38, 0.24);
-  --pms-alert-border: #EF4444;
-  --pms-alert-text: #FECACA;
+  --pms-alert-bg: rgba(185, 28, 28, 0.26);
+  --pms-alert-border: #FB7185;
+  --pms-alert-text: #FFE4E6;
 
   --pms-archived-bg: rgba(148, 163, 184, 0.14);
   --pms-archived-border: #64748B;
   --pms-archived-text: #CBD5E1;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-popover: 0 14px 32px -6px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
 
   --backdrop-scrim: rgba(4, 7, 13, 0.72);
   --scrollbar-thumb: rgba(255, 255, 255, 0.14);
@@ -182,7 +218,7 @@
   }
 
   *:focus-visible {
-    outline: 2px solid #2563EB;
+    outline: 2px solid var(--brand-primary);
     outline-offset: 2px;
   }
 }
@@ -191,24 +227,45 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Reusable semantic surface helpers */
+/* Reusable semantic Craft surface helpers */
 .ops-card {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 0.875rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-card);
 }
 
 .ops-panel {
-  background-color: var(--bg-elevated);
+  background-color: var(--bg-surface-subtle);
   border: 1px solid var(--border-subtle);
-  border-radius: 0.75rem;
+  border-radius: 0.625rem;
+}
+
+.ops-popover {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-popover);
+}
+
+.ops-brand-btn {
+  background-color: var(--brand-primary);
+  color: #FFFFFF;
+  transition: background-color 140ms ease, transform 120ms ease;
+}
+
+.ops-brand-btn:hover:not(:disabled) {
+  background-color: var(--brand-primary-hover);
+}
+
+.ops-brand-btn:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .ops-input {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -218,8 +275,20 @@
 
 .ops-input:focus {
   outline: none;
-  border-color: #2563EB;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px var(--brand-primary-soft);
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Custom slim theme-aware scrollbars */
@@ -239,7 +308,7 @@
 }
 
 /* ============================================================================
- * Printable Shift Z-Report & Room QR Poster (Always crisp black-on-white)
+ * Printable Reports: Shift Z-Report, Room QR Poster, Guest Welcome Card
  * ============================================================================ */
 @media print {
   html,
@@ -247,7 +316,7 @@
   [data-theme="dark"],
   [data-theme="light"] {
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #14171f !important;
     color-scheme: light !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -274,7 +343,7 @@
     inset: 0 !important;
     width: 100% !important;
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #14171f !important;
     padding: 24px !important;
     z-index: 9999 !important;
   }
@@ -292,8 +361,26 @@
     inset: 0 !important;
     width: 100% !important;
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #14171f !important;
     padding: 32px !important;
+    z-index: 9999 !important;
+  }
+
+  body[data-print-target="welcome-card"] * {
+    visibility: hidden;
+  }
+  body[data-print-target="welcome-card"] #printable-welcome-card,
+  body[data-print-target="welcome-card"] #printable-welcome-card * {
+    visibility: visible !important;
+  }
+  body[data-print-target="welcome-card"] #printable-welcome-card {
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #14171f !important;
+    padding: 28px !important;
     z-index: 9999 !important;
   }
 }

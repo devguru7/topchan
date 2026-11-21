@@ -6,9 +6,10 @@ import {
   Banknote,
   Coffee,
   DoorOpen,
+  FileText,
   Plus,
   ShieldCheck,
-  Sparkles,
+  Star,
   WashingMachine,
   X,
 } from 'lucide-react';
@@ -28,8 +29,9 @@ import { findAlternativeFreeRooms, findRoomConflicts } from '../../utils/availab
 import { SegmentedControl, StatusPill } from '../ui';
 
 const EXTEND_MODE_OPTIONS = [
-  { id: 'extend' as const, label: 'Продлить здесь' },
+  { id: 'extend' as const, label: 'Продлить' },
   { id: 'move' as const, label: 'Переселить' },
+  { id: 'split' as const, label: 'Split-Stay' },
 ];
 
 export const GuestFolioDrawer: React.FC = () => {
@@ -42,8 +44,10 @@ export const GuestFolioDrawer: React.FC = () => {
     addLedgerCharge,
     addPayment,
     extendOrMoveStay,
+    splitStayBooking,
     markGuestEmehmonRegistered,
     openCheckOutModal,
+    openWelcomeCardModal,
   } = useOps();
 
   const booking = useMemo(
@@ -57,9 +61,10 @@ export const GuestFolioDrawer: React.FC = () => {
   const [payAmount, setPayAmount] = useState('5');
 
   const [showExtendForm, setShowExtendForm] = useState(false);
-  const [extendMode, setExtendMode] = useState<'extend' | 'move'>('extend');
+  const [extendMode, setExtendMode] = useState<'extend' | 'move' | 'split'>('extend');
   const [extraNights, setExtraNights] = useState(1);
   const [moveRoomKey, setMoveRoomKey] = useState('');
+  const [splitDate, setSplitDate] = useState('');
 
   useEffect(() => {
     if (!booking) return;
@@ -69,6 +74,12 @@ export const GuestFolioDrawer: React.FC = () => {
     setPayCurrency('USD');
     setShowExtendForm(false);
     setShowPaymentForm(false);
+    const seg = booking.segments[booking.segments.length - 1];
+    if (seg && seg.nights >= 2) {
+      setSplitDate(addDaysIso(seg.fromDate, 1));
+    } else {
+      setSplitDate('');
+    }
   }, [booking?.id]);
 
   useEffect(() => {
@@ -159,20 +170,41 @@ export const GuestFolioDrawer: React.FC = () => {
 
   const targetMove =
     availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
+  const minSplitDate = lastSeg ? addDaysIso(lastSeg.fromDate, 1) : '';
+  const maxSplitDate = lastSeg ? addDaysIso(lastSeg.toDate, -1) : '';
+  const canSplitCurrentSeg = Boolean(lastSeg && lastSeg.nights >= 2 && minSplitDate <= maxSplitDate);
+  const effectiveSplitDate =
+    splitDate && splitDate >= minSplitDate && splitDate <= maxSplitDate
+      ? splitDate
+      : minSplitDate;
+
   const extFromDate =
-    extendMode === 'move' ? getTashkentTodayIso() : (lastSeg?.toDate ?? getTashkentTodayIso());
-  const extToDate = addDaysIso(extFromDate, Math.max(1, extraNights));
+    extendMode === 'split'
+      ? effectiveSplitDate
+      : extendMode === 'move'
+        ? getTashkentTodayIso()
+        : (lastSeg?.toDate ?? getTashkentTodayIso());
+  const extToDate =
+    extendMode === 'split'
+      ? (lastSeg?.toDate ?? addDaysIso(effectiveSplitDate, 1))
+      : addDaysIso(extFromDate, Math.max(1, extraNights));
   const extTargetRoomId =
-    extendMode === 'move' && targetMove ? targetMove.roomId : (lastSeg?.roomId ?? '');
-  const extTargetBedId = extendMode === 'move' ? targetMove?.bedId : lastSeg?.bedId;
-  const extendConflicts = findRoomConflicts(
-    state.bookings,
-    extTargetRoomId,
-    extTargetBedId,
-    extFromDate,
-    extToDate,
-    booking.id
-  );
+    (extendMode === 'move' || extendMode === 'split') && targetMove
+      ? targetMove.roomId
+      : (lastSeg?.roomId ?? '');
+  const extTargetBedId =
+    extendMode === 'move' || extendMode === 'split' ? targetMove?.bedId : lastSeg?.bedId;
+  const extendConflicts =
+    extFromDate && extToDate && extToDate > extFromDate
+      ? findRoomConflicts(
+          state.bookings,
+          extTargetRoomId,
+          extTargetBedId,
+          extFromDate,
+          extToDate,
+          booking.id
+        )
+      : [];
   const extendAlternatives =
     extendConflicts.length > 0 && currentRoom
       ? findAlternativeFreeRooms(
@@ -189,7 +221,17 @@ export const GuestFolioDrawer: React.FC = () => {
     e.preventDefault();
     if (extendConflicts.length > 0) return;
     let ok = false;
-    if (extendMode === 'move') {
+    if (extendMode === 'split') {
+      if (!lastSeg || !canSplitCurrentSeg || !targetMove || !effectiveSplitDate) return;
+      ok = splitStayBooking({
+        bookingId: booking.id,
+        segmentId: lastSeg.id,
+        splitDate: effectiveSplitDate,
+        targetRoomId: targetMove.roomId,
+        targetBedId: targetMove.bedId,
+        targetNightlyRateUsd: targetMove.rate,
+      });
+    } else if (extendMode === 'move') {
       if (!targetMove) return;
       ok = extendOrMoveStay({
         bookingId: booking.id,
@@ -216,7 +258,7 @@ export const GuestFolioDrawer: React.FC = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-40 backdrop-blur-xs flex justify-end"
+        className="fixed inset-0 z-40 backdrop-blur-[3px] flex justify-end"
         style={{ backgroundColor: 'var(--backdrop-scrim)' }}
         onClick={() => setSelectedBookingId(null)}
       >
@@ -224,11 +266,12 @@ export const GuestFolioDrawer: React.FC = () => {
           initial={{ x: '100%' }}
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-label={`Счёт гостя ${roomTitle}`}
-          className="w-full max-w-xl bg-[var(--bg-surface)] border-l border-[var(--border-strong)] h-full flex flex-col shadow-2xl"
+          style={{ boxShadow: 'var(--shadow-popover)' }}
+          className="w-full max-w-xl bg-[var(--bg-surface)] border-l border-[var(--border-strong)] h-full flex flex-col"
         >
           {/* Header */}
           <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3 shrink-0">
@@ -245,14 +288,25 @@ export const GuestFolioDrawer: React.FC = () => {
                 Счёт гостя · {roomTitle}
               </h2>
             </div>
-            <button
-              type="button"
-              aria-label="Закрыть счёт гостя"
-              onClick={() => setSelectedBookingId(null)}
-              className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              <X className="w-5 h-5" strokeWidth={1.75} />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => openWelcomeCardModal(booking.id)}
+                className="px-2.5 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors"
+                title="Печать или отправка Welcome-карты гостю"
+              >
+                <FileText className="w-3.5 h-3.5 text-[var(--brand-primary)]" strokeWidth={1.75} />
+                <span className="hidden sm:inline">Welcome</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Закрыть счёт гостя"
+                onClick={() => setSelectedBookingId(null)}
+                className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                <X className="w-5 h-5" strokeWidth={1.75} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -405,7 +459,7 @@ export const GuestFolioDrawer: React.FC = () => {
                             {guest.fullName}
                           </span>
                           {profile?.tag === 'vip' && (
-                            <StatusPill tone="amber" icon={Sparkles}>
+                            <StatusPill tone="amber" icon={Star}>
                               VIP · визит #{profile.visitsCount}
                             </StatusPill>
                           )}
@@ -504,41 +558,82 @@ export const GuestFolioDrawer: React.FC = () => {
                     size="sm"
                     fullWidth
                   />
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-xs text-[var(--text-muted)] mb-1">
-                        Кол-во ночей
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={30}
-                        value={extraNights}
-                        onChange={(e) =>
-                          setExtraNights(Math.max(1, parseInt(e.target.value, 10) || 1))
-                        }
-                        className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
-                      />
-                    </div>
-                    {extendMode === 'move' && (
+                  {extendMode === 'split' ? (
+                    canSplitCurrentSeg ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-xs text-[var(--text-muted)] mb-1">
+                            Дата переезда (Split-Stay)
+                          </label>
+                          <input
+                            type="date"
+                            min={minSplitDate}
+                            max={maxSplitDate}
+                            value={effectiveSplitDate}
+                            onChange={(e) => setSplitDate(e.target.value)}
+                            className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-[var(--text-muted)] mb-1">
+                            Комната с {effectiveSplitDate}
+                          </label>
+                          <select
+                            value={moveRoomKey}
+                            onChange={(e) => setMoveRoomKey(e.target.value)}
+                            className="ops-input w-full px-2.5 py-2 text-xs"
+                          >
+                            {availableRoomsForMove.map((o) => (
+                              <option key={o.key} value={o.key}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Split-Stay доступен для брони длительностью от 2 ночей (текущий отрезок:{' '}
+                        {lastSeg?.nights ?? 0} н.).
+                      </p>
+                    )
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="block text-xs text-[var(--text-muted)] mb-1">
-                          Новая комната
+                          Кол-во ночей
                         </label>
-                        <select
-                          value={moveRoomKey}
-                          onChange={(e) => setMoveRoomKey(e.target.value)}
-                          className="ops-input w-full px-2.5 py-2 text-xs"
-                        >
-                          {availableRoomsForMove.map((o) => (
-                            <option key={o.key} value={o.key}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          max={30}
+                          value={extraNights}
+                          onChange={(e) =>
+                            setExtraNights(Math.max(1, parseInt(e.target.value, 10) || 1))
+                          }
+                          className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
+                        />
                       </div>
-                    )}
-                  </div>
+                      {extendMode === 'move' && (
+                        <div>
+                          <label className="block text-xs text-[var(--text-muted)] mb-1">
+                            Новая комната
+                          </label>
+                          <select
+                            value={moveRoomKey}
+                            onChange={(e) => setMoveRoomKey(e.target.value)}
+                            className="ops-input w-full px-2.5 py-2 text-xs"
+                          >
+                            {availableRoomsForMove.map((o) => (
+                              <option key={o.key} value={o.key}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {extendConflicts.length > 0 && (
                     <div
                       className="rounded-xl border p-3 text-xs space-y-2"
@@ -567,7 +662,7 @@ export const GuestFolioDrawer: React.FC = () => {
                                 key={key}
                                 type="button"
                                 onClick={() => {
-                                  setExtendMode('move');
+                                  setExtendMode(extendMode === 'split' ? 'split' : 'move');
                                   setMoveRoomKey(key);
                                 }}
                                 className="px-2.5 py-1 rounded-xl border font-semibold text-xs"
@@ -587,10 +682,17 @@ export const GuestFolioDrawer: React.FC = () => {
                   )}
                   <button
                     type="submit"
-                    disabled={extendConflicts.length > 0}
+                    disabled={
+                      extendConflicts.length > 0 ||
+                      (extendMode === 'split' && (!canSplitCurrentSeg || !targetMove))
+                    }
                     className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-xs font-semibold text-white transition-colors"
                   >
-                    {extendMode === 'move' ? 'Подтвердить переселение' : 'Продлить проживание'}
+                    {extendMode === 'split'
+                      ? 'Разделить бронь (Split-Stay)'
+                      : extendMode === 'move'
+                        ? 'Подтвердить переселение'
+                        : 'Продлить проживание'}
                   </button>
                 </form>
               )}

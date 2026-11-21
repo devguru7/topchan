@@ -11,12 +11,13 @@ import {
   DoorOpen,
   ExternalLink,
   FileCheck2,
+  FileText,
   Loader2,
   Mic,
   MicOff,
   Search,
   ShieldCheck,
-  Sparkles,
+  Terminal,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -284,7 +285,7 @@ export const ShiftTab: React.FC = () => {
       setAiParsedOverride(res.parsed);
       setAiEngine(res.engine);
       pushToast(
-        res.engine === 'gemini' ? 'Разобрано через Gemini AI' : 'Разобрано локальным парсером',
+        res.engine === 'gemini' ? 'Строка разобрана' : 'Разобрано локальным парсером',
         res.parsed.confidenceNote,
         res.engine === 'gemini' ? 'emerald' : 'cobalt'
       );
@@ -375,29 +376,29 @@ export const ShiftTab: React.FC = () => {
             />
           ) : (
             <div className="ops-card overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[62vh] overflow-y-auto">
                 <table
                   className="w-full text-left border-collapse min-w-[900px]"
                   data-testid="emehmon-registry-table"
                 >
-                  <thead>
+                  <thead className="sticky top-0 z-10">
                     <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-strong)] text-xs font-semibold text-[var(--text-secondary)]">
-                      <th className="py-3 px-2.5 whitespace-nowrap">Комната / Койка</th>
-                      <th className="py-3 px-2.5 whitespace-nowrap">ФИО гостя</th>
-                      <th className="py-3 px-2 whitespace-nowrap">Гражд.</th>
-                      <th className="py-3 px-2.5 whitespace-nowrap">Паспорт</th>
-                      <th className="py-3 px-2.5 whitespace-nowrap">Даты</th>
-                      <th className="py-3 px-2.5 whitespace-nowrap">E-mehmon</th>
-                      <th className="py-3 px-2 whitespace-nowrap">Квиток</th>
-                      <th className="py-3 px-2 whitespace-nowrap text-right">Баланс</th>
-                      <th className="py-3 px-2.5 whitespace-nowrap text-right">Действия</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap">Комната / Койка</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap">ФИО гостя</th>
+                      <th className="py-2.5 px-2 whitespace-nowrap">Гражд.</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap">Паспорт</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap">Даты</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap">E-mehmon</th>
+                      <th className="py-2.5 px-2 whitespace-nowrap">Квиток</th>
+                      <th className="py-2.5 px-2 whitespace-nowrap text-right">Баланс</th>
+                      <th className="py-2.5 px-2.5 whitespace-nowrap text-right">Действия</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border-subtle)] text-xs">
                     {filteredRegistryRows.map((row) => (
                       <tr
                         key={row.key}
-                        className="hover:bg-[var(--bg-hover)]/50 transition-colors"
+                        className="group h-[44px] hover:bg-[var(--bg-hover)]/50 transition-colors"
                       >
                         <td className="py-2.5 px-2.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
@@ -540,10 +541,10 @@ export const ShiftTab: React.FC = () => {
           <section className="ops-card p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Sparkles
+                <Terminal
                   className="w-4 h-4 shrink-0"
                   strokeWidth={1.75}
-                  style={{ color: 'var(--tone-cobalt-fg)' }}
+                  style={{ color: 'var(--brand-primary)' }}
                 />
                 <h2 className="text-sm font-bold text-[var(--text-primary)]">
                   Быстрая командная строка ресепшна
@@ -612,9 +613,9 @@ export const ShiftTab: React.FC = () => {
                 {aiLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.75} />
                 ) : (
-                  <Sparkles className="w-4 h-4" strokeWidth={1.75} />
+                  <FileText className="w-4 h-4" strokeWidth={1.75} />
                 )}
-                AI-разбор
+                Точный разбор
               </button>
             </div>
 
@@ -671,7 +672,7 @@ export const ShiftTab: React.FC = () => {
                         Карточка подтверждения в 1 клик
                       </span>
                       <StatusPill tone={aiEngine === 'gemini' ? 'emerald' : 'cobalt'}>
-                        {aiEngine === 'gemini' ? 'Gemini AI' : 'Локальный движок'}
+                        {aiEngine === 'gemini' ? 'Точный разбор' : 'Локальный движок'}
                       </StatusPill>
                     </div>
                     <div className="text-xs text-[var(--text-muted)]">{parsed.confidenceNote}</div>
@@ -753,7 +754,7 @@ export const ShiftTab: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleCommit}
-                    className="h-10 px-5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors"
+                    className="ops-brand-btn h-10 px-5 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-2"
                   >
                     Подтвердить и провести
                     <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
@@ -786,8 +787,8 @@ export const ShiftTab: React.FC = () => {
 
               <div className="w-full h-1.5 rounded-full bg-[var(--bg-elevated)] overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-[#16A34A] transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
+                  className="h-full rounded-full transition-[width] duration-500"
+                  style={{ width: `${progressPct}%`, backgroundColor: 'var(--status-inhouse)' }}
                 />
               </div>
 

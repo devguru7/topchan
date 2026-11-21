@@ -1016,7 +1016,7 @@ export function createSeedState(baseDateIso?: string): AppState {
           'Здравствуйте! Спасибо за обращение в Topchan Hostel (Ташкент). На 24–27 ноября у нас свободны 3 отдельные комнаты (Small/Yellow/Orange). Ранний заезд в 07:00 возможен за +50% от стоимости суток, также организуем трансфер из аэропорта (3 км, $5/машина). Подтвердить бронь напрямую без комиссии?',
         resolved: false,
         actions: [
-          { id: 'act-3', label: 'Скопировать AI-черновик', kind: 'copy_draft' },
+          { id: 'act-3', label: 'Скопировать черновик ответа', kind: 'copy_draft' },
           { id: 'act-4', label: 'Отметить обработанным', kind: 'dismiss' },
         ],
       },
@@ -1124,6 +1124,85 @@ export function createSeedState(baseDateIso?: string): AppState {
       exManualOverride: false,
       bcvUzs: DEFAULT_BCV_UZS, // 440 000
     },
+    operationalDate: today,
+    lostFoundItems: [
+      {
+        id: 'lf-1',
+        propertyId,
+        itemName: 'Зарядка Apple USB-C 20W (белая)',
+        foundLocation: 'Yellow-2 (у изголовья)',
+        guestName: 'Elena Kim',
+        foundDate: addDaysIso(today, -1),
+        status: 'stored',
+        notes: 'Хранится в ящике ресепшн, написали гостю в WhatsApp',
+      },
+      {
+        id: 'lf-2',
+        propertyId,
+        itemName: 'Солнцезащитные очки Ray-Ban',
+        foundLocation: 'Двор / Топчан #2',
+        foundDate: addDaysIso(today, -2),
+        status: 'stored',
+        notes: 'В чёрном чехле, ждёт обращения владельца',
+      },
+    ],
+    shiftHistory: [
+      {
+        id: 'sh-prev-1',
+        propertyId,
+        businessDate: addDaysIso(today, -1),
+        closedAt: `${today}T00:05:00+05:00`,
+        actor: 'Дильшод (Ночная смена)',
+        occupiedUnits: 14,
+        totalUnits: 37,
+        noShowCancelledCount: 0,
+        unregisteredForeigners: 0,
+        touristTaxUzs: 528000,
+        pocketsSnapshot: [
+          { id: 'cash_uzs', name: 'Нал UZS (Стол)', currency: 'UZS', balance: 1480000 },
+          { id: 'cash_usd', name: 'Нал USD (Стол)', currency: 'USD', balance: 340 },
+          { id: 'cash_eur', name: 'Нал EUR (Стол)', currency: 'EUR', balance: 50 },
+          { id: 'terminal', name: 'Терминал Uzcard/Humo', currency: 'UZS', balance: 820000 },
+          { id: 'transfer', name: 'Перевод Click / Payme', currency: 'UZS', balance: 450000 },
+          { id: 'safe', name: 'Сейф (Инкассация)', currency: 'USD', balance: 1120 },
+        ],
+        notes: 'Кухня продезинфицирована в 00:00, все гости E-mehmon оформлены, расхождений кассы 0.',
+      },
+    ],
+    mailInbox: [
+      {
+        id: 'mail-1',
+        propertyId,
+        folder: 'Spam',
+        from: 'booking@silkroad-tours.de',
+        subject: 'Group request: 3 private rooms (6 pax) + airport pickup',
+        receivedAt: `${today}T10:08:00+05:00`,
+        category: 'booking',
+        snippet:
+          'Hello! Looking for 3 private rooms for 6 guests, early arrival at 07:00 from Tashkent Airport. Do you have availability?',
+        draftReplyRu:
+          'Здравствуйте! В Topchan Hostel (ул. 8 Марта, 104, 3 км от аэропорта) доступны 3 отдельные комнаты (Small/Yellow/Orange). Ранний заезд в 07:00 — +50% от суток, трансфер из аэропорта $5/машина. Подтвердить прямую бронь?',
+        draftReplyEn:
+          'Hello from Topchan Hostel Tashkent (104, 8-Mart st., 3 km from airport)! We have 3 private rooms available. Early check-in at 07:00 is +50% of 1 night, and airport pickup is $5/car. Would you like us to confirm directly?',
+        handled: false,
+      },
+      {
+        id: 'mail-2',
+        propertyId,
+        folder: 'INBOX',
+        from: 'h.tanaka@travel-jp.org',
+        subject: 'Late night flight HY-532 transfer & luggage drop',
+        receivedAt: `${today}T09:14:00+05:00`,
+        category: 'transfer',
+        snippet:
+          'Hi Topchan team, my flight lands at 04:15 AM. Can I leave my backpack before 14:00 check-in and book airport taxi?',
+        draftReplyRu:
+          'Здравствуйте! Да, вы можете бесплатно оставить багаж на ресепшн с 04:15 и отдохнуть во дворе до заезда в 14:00. Водитель встретит вас в аэропорту ($5). Код двери 4242, ресепшн работает 24/7.',
+        draftReplyEn:
+          'Hi! Yes, our reception is 24/7 — you can drop your backpack for free at 04:15 AM and relax until 14:00 check-in. We can arrange our trusted airport driver ($5, 10 min ride). Door code: 4242.',
+        handled: false,
+      },
+    ],
     integrations: {
       propertyName: 'Topchan Hostel · Tashkent',
       bnovoAccountId: 'TOPCHAN-UZ-01',

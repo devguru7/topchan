@@ -2,8 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Briefcase,
-  Camera,
-  CheckCircle2,
   FastForward,
   Minus,
   Package,
@@ -12,7 +10,6 @@ import {
   Plus,
   Printer,
   QrCode,
-  Sparkles,
   Star,
   WashingMachine,
   Wifi,
@@ -22,6 +19,8 @@ import type { ServicesSubTab } from '../../context/UIContext';
 import type { GuestLang, LaundryJob, TransferStatus } from '../../types/ops';
 import { formatTimer } from '../../utils/math';
 import { CopyButton, EmptyState, SegmentedControl, StatusPill, type StatusTone } from '../ui';
+import { HousekeepingBoard } from '../HousekeepingBoard';
+import { LuggageTracker } from '../LuggageTracker';
 
 const QR_COPY: Record<
   GuestLang,
@@ -160,10 +159,10 @@ const LaundryJobCard: React.FC<{
       {/* Animated Progress Bar */}
       <div className="w-full h-2 rounded-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] overflow-hidden">
         <div
-          className="h-full rounded-full transition-all duration-500"
+          className="h-full rounded-full transition-[width] duration-500"
           style={{
             width: `${pct}%`,
-            backgroundColor: job.status === 'completed' ? '#059669' : '#2563EB',
+            backgroundColor: job.status === 'completed' ? 'var(--status-inhouse)' : 'var(--brand-primary)',
           }}
         />
       </div>
@@ -200,10 +199,6 @@ export const ServicesTab: React.FC = () => {
     setServicesSubTab,
     startLaundryJob,
     speedUpLaundry,
-    maidMarkCleaned,
-    adminApproveHousekeeping,
-    addLuggageItem,
-    releaseLuggageItem,
     addTransferJob,
     cycleTransferStatus,
     adjustStock,
@@ -221,12 +216,6 @@ export const ServicesTab: React.FC = () => {
   const [laundryBookingId, setLaundryBookingId] = useState(activeBookings[0]?.id ?? '');
   const [laundryMode, setLaundryMode] = useState<'fast' | 'medium'>('fast');
   const [chargeLaundry, setChargeLaundry] = useState(true);
-
-  // Luggage form
-  const [lugGuest, setLugGuest] = useState('');
-  const [lugBags, setLugBags] = useState('1');
-  const [lugFlight, setLugFlight] = useState('23:40');
-  const [lugNotes, setLugNotes] = useState('');
 
   // Transfer form
   const [trGuest, setTrGuest] = useState('');
@@ -302,19 +291,6 @@ export const ServicesTab: React.FC = () => {
       mode: laundryMode,
       chargeToFolio: chargeLaundry,
     });
-  };
-
-  const handleAddLuggage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!lugGuest.trim()) return;
-    addLuggageItem({
-      guestName: lugGuest.trim(),
-      bagsCount: Math.max(1, parseInt(lugBags, 10) || 1),
-      flightTime: lugFlight,
-      notes: lugNotes.trim(),
-    });
-    setLugGuest('');
-    setLugNotes('');
   };
 
   const handleAddTransfer = (e: React.FormEvent) => {
@@ -478,185 +454,19 @@ export const ServicesTab: React.FC = () => {
             )}
           </section>
 
-          {/* Housekeeping Queue */}
-          <section className="lg:col-span-6 ops-card p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles
-                  className="w-4 h-4 shrink-0"
-                  strokeWidth={1.75}
-                  style={{ color: 'var(--tone-amber-fg)' }}
-                />
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                  Очередь уборки (Горничные → Админ)
-                </h2>
-              </div>
-              <StatusPill tone={pendingHkTasks.length > 0 ? 'amber' : 'emerald'} mono>
-                Активных: {pendingHkTasks.length}
-              </StatusPill>
-            </div>
-
-            {pendingHkTasks.length === 0 ? (
-              <EmptyState
-                icon={CheckCircle2}
-                title="Все комнаты убраны и приняты"
-                description="После выселения гостя новая задача на уборку автоматически появится здесь."
-              />
-            ) : (
-              <div className="space-y-3">
-                {pendingHkTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="p-4 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-sm font-semibold text-[var(--text-primary)]">
-                          {task.roomLabel}
-                        </div>
-                        <p className="text-xs text-[var(--text-muted)] mt-0.5">{task.notes}</p>
-                      </div>
-                      <StatusPill tone={task.status === 'maid_done' ? 'emerald' : 'amber'}>
-                        {task.status === 'maid_done' ? 'Фото готово' : 'Нужна уборка'}
-                      </StatusPill>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {task.status === 'dirty' && (
-                        <button
-                          type="button"
-                          onClick={() => maidMarkCleaned(task.id)}
-                          className="flex-1 py-2 px-3 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] inline-flex items-center justify-center gap-1.5 transition-colors"
-                        >
-                          <Camera
-                            className="w-3.5 h-3.5 shrink-0"
-                            strokeWidth={1.75}
-                            style={{ color: 'var(--tone-cobalt-fg)' }}
-                          />
-                          Горничная: Убрано + фото
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => adminApproveHousekeeping(task.id)}
-                        className="flex-1 py-2 px-3 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                        Принять уборку (→ Свободна)
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Live Housekeeping Board */}
+          <section className="lg:col-span-6 ops-card p-5">
+            <HousekeepingBoard compact />
           </section>
         </div>
       )}
 
-      {/* SUB-TAB 2: Luggage & Airport Transfers */}
+      {/* SUB-TAB 2: Luggage & Lost-Found + Airport Transfers */}
       {servicesSubTab === 'luggage_transfers' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Luggage Storage */}
-          <section className="lg:col-span-6 ops-card p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Briefcase
-                  className="w-4 h-4 shrink-0"
-                  strokeWidth={1.75}
-                  style={{ color: 'var(--tone-cobalt-fg)' }}
-                />
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                  Камера хранения багажа (#B01+)
-                </h2>
-              </div>
-              <StatusPill tone="cobalt" mono>
-                На хранении: {storedLuggageCount}
-              </StatusPill>
-            </div>
-
-            <form
-              onSubmit={handleAddLuggage}
-              className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-2xl bg-[var(--bg-elevated)] p-3.5 border border-[var(--border-subtle)]"
-            >
-              <input
-                type="text"
-                value={lugGuest}
-                onChange={(e) => setLugGuest(e.target.value)}
-                placeholder="Имя гостя"
-                className="ops-input col-span-2 px-3 py-2 text-xs"
-              />
-              <input
-                type="number"
-                min="1"
-                value={lugBags}
-                onChange={(e) => setLugBags(e.target.value)}
-                aria-label="Количество сумок"
-                className="ops-input px-2.5 py-2 font-mono tabular-nums text-xs"
-              />
-              <input
-                type="time"
-                value={lugFlight}
-                onChange={(e) => setLugFlight(e.target.value)}
-                aria-label="Время рейса"
-                className="ops-input px-2 py-2 font-mono tabular-nums text-xs"
-              />
-              <input
-                type="text"
-                value={lugNotes}
-                onChange={(e) => setLugNotes(e.target.value)}
-                placeholder="Описание (чемодан, рюкзак...)"
-                className="ops-input col-span-2 sm:col-span-3 px-3 py-2 text-xs"
-              />
-              <button
-                type="submit"
-                className="col-span-2 sm:col-span-1 py-2 px-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors"
-              >
-                Выдать бирку
-              </button>
-            </form>
-
-            {state.luggageItems.length === 0 ? (
-              <EmptyState
-                icon={Briefcase}
-                title="Камера хранения пуста"
-                description="Добавьте багаж здесь или при выселении гостя в окне Check-out."
-              />
-            ) : (
-              <div className="space-y-2.5">
-                {state.luggageItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
-                        <span
-                          className="font-mono"
-                          style={{ color: 'var(--tone-cobalt-fg)' }}
-                        >
-                          {item.tagCode}
-                        </span>
-                        <span className="truncate">{item.guestName}</span>
-                      </div>
-                      <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums mt-0.5">
-                        {item.bagsCount} мест · вылет {item.flightTime}
-                        {item.notes ? ` · ${item.notes}` : ''}
-                      </div>
-                    </div>
-                    {item.status === 'stored' ? (
-                      <button
-                        type="button"
-                        onClick={() => releaseLuggageItem(item.id)}
-                        className="px-3.5 py-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[#059669] hover:text-white text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] shrink-0 transition-colors"
-                      >
-                        Выдать
-                      </button>
-                    ) : (
-                      <StatusPill tone="emerald">Выдан</StatusPill>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Luggage Storage & Lost/Found Tracker */}
+          <section className="lg:col-span-6 ops-card p-5">
+            <LuggageTracker />
           </section>
 
           {/* Airport Transfers */}
@@ -1030,7 +840,10 @@ export const ServicesTab: React.FC = () => {
 
           {/* Clean Phone Mockup Frame */}
           <section className="lg:col-span-6 ops-card p-6 flex justify-center">
-            <div className="w-full max-w-[332px] bg-[var(--bg-canvas)] border-2 border-[var(--border-strong)] rounded-[32px] p-4 space-y-4 shadow-xl">
+            <div
+              className="w-full max-w-[332px] bg-[var(--bg-canvas)] border-2 border-[var(--border-strong)] rounded-[32px] p-4 space-y-4"
+              style={{ boxShadow: 'var(--shadow-popover)' }}
+            >
               <div className="w-16 h-1.5 bg-[var(--border-strong)] rounded-full mx-auto" />
               <div className="space-y-1">
                 <div

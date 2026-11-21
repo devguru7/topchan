@@ -44,6 +44,32 @@
     };
   }
 
+  // Exact Topchan Hostel 20-room / 37-unit inventory mapper
+  const TOPCHAN_CATEGORY_PATTERNS = [
+    { re: /small[\s#-]*([1-6])/i, build: (m) => `Small-${m[1]}`, cat: 'Small' },
+    { re: /small/i, build: () => 'Small-1', cat: 'Small' },
+    { re: /yellow[\s#-]*([1-5])/i, build: (m) => `Yellow-${m[1]}`, cat: 'Yellow' },
+    { re: /yellow/i, build: () => 'Yellow-1', cat: 'Yellow' },
+    { re: /violet|фиолет/i, build: () => 'Violet', cat: 'Violet' },
+    { re: /\bred\b|красн/i, build: () => 'Red', cat: 'Red' },
+    { re: /green|зел[её]н/i, build: () => 'Green', cat: 'Green' },
+    { re: /orange|оранж/i, build: () => 'Orange', cat: 'Orange' },
+    { re: /pink|розов/i, build: () => 'Pink', cat: 'Pink' },
+    { re: /blue|family|семейн/i, build: () => 'Blue (Family)', cat: 'Blue (Family)' },
+    { re: /fem(?:ale)?[\s#-]*([1-4])?/i, build: (m) => (m[1] ? `Fem-${m[1]}` : 'Fem-1'), cat: 'Fem Dorm' },
+    { re: /six[\s#-]*([1-6])?|6[\s-]*bed/i, build: (m) => (m[1] ? `Six-${m[1]}` : 'Six-1'), cat: 'Six Dorm' },
+    { re: /mix(?:ed)?[\s#-]*([1-9]|10)?|10[\s-]*bed|dorm/i, build: (m) => (m[1] ? `Mix-${m[1]}` : 'Mix-1'), cat: 'Mix Dorm' },
+  ];
+
+  function mapToTopchanRoom(rawCategory, rawRoomCode) {
+    const combined = `${rawRoomCode || ''} ${rawCategory || ''}`.trim();
+    for (const rule of TOPCHAN_CATEGORY_PATTERNS) {
+      const m = combined.match(rule.re);
+      if (m) return { roomCode: rule.build(m), category: rule.cat };
+    }
+    return { roomCode: rawRoomCode || 'Small-1', category: rawCategory || 'Small' };
+  }
+
   function scrapeBnovoBooking() {
     const guestName =
       pickField([
@@ -86,11 +112,20 @@
     const checkInDate = explicitArrival || parsedRange.checkInDate;
     const checkOutDate = explicitDeparture || parsedRange.checkOutDate;
 
-    const category = pickField([
+    const categoryRaw = pickField([
       '[data-testid="room-category"]',
       '.booking-room-type',
       '.room-type-name',
     ]);
+
+    const roomCodeRaw = pickField([
+      '[data-testid="room-number"]',
+      '.booking-room-number',
+      '.room-name',
+      'select[name*="room" i]',
+    ]);
+
+    const mapped = mapToTopchanRoom(categoryRaw, roomCodeRaw);
 
     const balanceRaw = pickField([
       '[data-testid="booking-balance"]',
@@ -136,7 +171,8 @@
       checkInDate,
       checkOutDate,
       datesRaw: datesRaw || (checkInDate && checkOutDate ? `${checkInDate} → ${checkOutDate}` : ''),
-      category: category || 'Small',
+      category: mapped.category,
+      roomCode: mapped.roomCode,
       balanceRaw: balanceRaw || '$0',
     };
   }

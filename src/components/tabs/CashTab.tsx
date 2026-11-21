@@ -7,7 +7,9 @@ import {
   Calculator,
   CheckCircle2,
   ClipboardCheck,
+  Download,
   ExternalLink,
+  History,
   Minus,
   Plus,
   Printer,
@@ -29,12 +31,22 @@ import {
   UZS_DENOMINATIONS,
 } from '../../utils/math';
 import {
+  createEmptyCashFormDefaults,
+  DEMO_CASH_FORM_EXAMPLE,
+} from '../../utils/cashFormDefaults';
+import {
   addDaysIso,
   formatShortDateColumn,
   formatTashkentDateRu,
   getDaysToTouristTaxDeadline,
   getTashkentTodayIso,
 } from '../../utils/time';
+import {
+  buildCashPnlCsv,
+  buildShiftArchiveCsv,
+  buildTouristTaxCsv,
+  triggerCsvDownload,
+} from '../../utils/exportReports';
 import {
   CopyButton,
   EmptyState,
@@ -65,6 +77,7 @@ const CHANGE_PREF_OPTIONS = [
 export const CashTab: React.FC = () => {
   const {
     state,
+    storageKind,
     addPettyCashExpense,
     recordCashCalculatorTransaction,
     createSafeCollection,
@@ -74,43 +87,53 @@ export const CashTab: React.FC = () => {
     pushToast,
   } = useOps();
 
+  const isDemoMode = storageKind === 'local';
   const [subTab, setSubTab] = useState<CashSubTab>('pockets');
   const [activePocketFilter, setActivePocketFilter] = useState<CashPocketId | 'all'>('all');
 
-  // Dual-rate change calculator
-  const [billInputUsd, setBillInputUsd] = useState('36');
+  // Dual-rate change calculator (strictly empty live defaults)
+  const initialDefaults = useMemo(() => createEmptyCashFormDefaults(), []);
+  const [billInputUsd, setBillInputUsd] = useState(initialDefaults.billInputUsd);
   const [receivedCurrency, setReceivedCurrency] = useState<CurrencyCode>('USD');
-  const [receivedAmount, setReceivedAmount] = useState('50');
+  const [receivedAmount, setReceivedAmount] = useState(initialDefaults.receivedAmount);
   const [changePreference, setChangePreference] = useState<'UZS' | 'USD'>('UZS');
-  const [calcLabel, setCalcLabel] = useState('Оплата проживания (калькулятор)');
+  const [calcLabel, setCalcLabel] = useState(initialDefaults.calcLabel);
 
-  // Petty cash
-  const [pettyCategory, setPettyCategory] = useState('Вода Hydrolife');
-  const [pettyAmount, setPettyAmount] = useState('60000');
-  const [pettyNote, setPettyNote] = useState('');
+  // Petty cash (strictly empty live defaults)
+  const [pettyCategory, setPettyCategory] = useState(initialDefaults.pettyCategory);
+  const [pettyAmount, setPettyAmount] = useState(initialDefaults.pettyAmount);
+  const [pettyNote, setPettyNote] = useState(initialDefaults.pettyNote);
 
-  // Safe collection
-  const [safeUzs, setSafeUzs] = useState('1000000');
-  const [safeUsd, setSafeUsd] = useState('100');
-  const [safeEur, setSafeEur] = useState('0');
+  // Safe collection (strictly empty live defaults)
+  const [safeUzs, setSafeUzs] = useState(initialDefaults.safeUzs);
+  const [safeUsd, setSafeUsd] = useState(initialDefaults.safeUsd);
+  const [safeEur, setSafeEur] = useState(initialDefaults.safeEur);
 
-  // 60-Second Denomination Counter
-  const [uzsBills, setUzsBills] = useState<Record<number, number>>({
-    200000: 5,
-    100000: 10,
-    50000: 9,
-    20000: 0,
-    10000: 0,
-    5000: 0,
-  });
-  const [usdBills, setUsdBills] = useState<Record<number, number>>({
-    100: 2,
-    50: 2,
-    20: 2,
-    10: 0,
-    5: 0,
-    1: 0,
-  });
+  // 60-Second Denomination Counter (strictly 0 live defaults)
+  const [uzsBills, setUzsBills] = useState<Record<number, number>>(() => ({
+    ...initialDefaults.uzsBills,
+  }));
+  const [usdBills, setUsdBills] = useState<Record<number, number>>(() => ({
+    ...initialDefaults.usdBills,
+  }));
+
+  const fillDemoCalculatorExample = () => {
+    setBillInputUsd(DEMO_CASH_FORM_EXAMPLE.billInputUsd);
+    setReceivedCurrency('USD');
+    setReceivedAmount(DEMO_CASH_FORM_EXAMPLE.receivedAmount);
+    setCalcLabel(DEMO_CASH_FORM_EXAMPLE.calcLabel);
+  };
+
+  const fillDemoPettyExample = () => {
+    setPettyCategory(DEMO_CASH_FORM_EXAMPLE.pettyCategory);
+    setPettyAmount(DEMO_CASH_FORM_EXAMPLE.pettyAmount);
+    setPettyNote(DEMO_CASH_FORM_EXAMPLE.pettyNote);
+  };
+
+  const fillDemoDenomExample = () => {
+    setUzsBills({ ...DEMO_CASH_FORM_EXAMPLE.uzsBills });
+    setUsdBills({ ...DEMO_CASH_FORM_EXAMPLE.usdBills });
+  };
 
   const calcResult = useMemo(
     () =>
@@ -229,7 +252,10 @@ export const CashTab: React.FC = () => {
 
   const handleRecordCalc = () => {
     const recNum = parseFloat(receivedAmount) || 0;
-    if (recNum <= 0) return;
+    if (recNum <= 0) {
+      pushToast('Укажите сумму', 'Введите фактически принятую от гостя сумму', 'amber');
+      return;
+    }
     const pocketId: CashPocketId =
       receivedCurrency === 'USD'
         ? 'cash_usd'
@@ -244,23 +270,41 @@ export const CashTab: React.FC = () => {
       changeUsd: changePreference === 'USD' ? calcResult.changeUsd : 0,
       label: calcLabel.trim() || 'Оплата через калькулятор',
     });
+    setBillInputUsd('');
+    setReceivedAmount('');
+    setCalcLabel('');
   };
 
   const handlePettySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseInt(pettyAmount, 10) || 0;
-    if (amt <= 0) return;
-    addPettyCashExpense(pettyCategory, amt, pettyNote.trim());
+    if (!pettyCategory.trim()) {
+      pushToast('Выберите категорию', 'Укажите категорию хозрасхода перед списанием', 'amber');
+      return;
+    }
+    if (amt <= 0) {
+      pushToast('Укажите сумму', 'Введите сумму расхода в сумах', 'amber');
+      return;
+    }
+    addPettyCashExpense(pettyCategory.trim(), amt, pettyNote.trim());
+    setPettyCategory('');
+    setPettyAmount('');
     setPettyNote('');
   };
 
   const handleSafeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createSafeCollection(
-      Math.max(0, parseInt(safeUzs, 10) || 0),
-      Math.max(0, parseFloat(safeUsd) || 0),
-      Math.max(0, parseFloat(safeEur) || 0)
-    );
+    const uzs = Math.max(0, parseInt(safeUzs, 10) || 0);
+    const usd = Math.max(0, parseFloat(safeUsd) || 0);
+    const eur = Math.max(0, parseFloat(safeEur) || 0);
+    if (uzs === 0 && usd === 0 && eur === 0) {
+      pushToast('Сумма инкассации пуста', 'Введите сумму хотя бы в одной валюте', 'amber');
+      return;
+    }
+    createSafeCollection(uzs, usd, eur);
+    setSafeUzs('');
+    setSafeUsd('');
+    setSafeEur('');
   };
 
   const telegramShiftReportText = useMemo(() => {
@@ -273,17 +317,17 @@ export const CashTab: React.FC = () => {
       })
       .join('\n');
     return [
-      `📊 ОТЧЁТ СМЕНЫ · TOPCHAN HOSTEL (${state.adminName})`,
+      `ОТЧЁТ СМЕНЫ · TOPCHAN HOSTEL (${state.adminName})`,
       `Курсы: ЦБ ${state.currency.cbuUsd} | Acc ${state.currency.accRate} | Ex ${state.currency.exRate}`,
       ``,
-      `💰 6 карманов кассы:`,
+      `6 карманов кассы:`,
       pocketLines,
       ``,
-      `🧾 Сверка стола (факт vs ожидание):`,
+      `Сверка стола (факт vs ожидание):`,
       `• UZS: ${formatUzs(denomTotals.totalUzs)} (расхождение: ${diffUzs >= 0 ? '+' : ''}${formatUzs(diffUzs)})`,
       `• USD: ${formatUsd(denomTotals.totalUsd)} (расхождение: ${diffUsd >= 0 ? '+' : ''}${formatUsd(diffUsd)})`,
       ``,
-      `🏛 Турсбор РУз (БРВ ${state.currency.bcvUzs.toLocaleString('ru-RU')} · ${activePhysicalCount} комн.): ${formatUzs(monthlyTouristTaxUzs)}`,
+      `Турсбор РУз (БРВ ${state.currency.bcvUzs.toLocaleString('ru-RU')} · ${activePhysicalCount} комн.): ${formatUzs(monthlyTouristTaxUzs)}`,
     ].join('\n');
   }, [
     state.pockets,
@@ -451,9 +495,20 @@ export const CashTab: React.FC = () => {
                   align="left"
                 />
               </div>
-              <StatusPill tone="neutral" mono>
-                Acc {state.currency.accRate} / Ex {state.currency.exRate}
-              </StatusPill>
+              <div className="flex items-center gap-2">
+                {isDemoMode && (
+                  <button
+                    type="button"
+                    onClick={fillDemoCalculatorExample}
+                    className="px-2.5 py-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] transition-colors"
+                  >
+                    Подставить пример
+                  </button>
+                )}
+                <StatusPill tone="neutral" mono>
+                  Acc {state.currency.accRate} / Ex {state.currency.exRate}
+                </StatusPill>
+              </div>
             </div>
 
             {/* Quick-bill presets */}
@@ -488,6 +543,7 @@ export const CashTab: React.FC = () => {
                   step="any"
                   value={billInputUsd}
                   onChange={(e) => setBillInputUsd(e.target.value)}
+                  placeholder="Например: 36"
                   className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
                 />
               </div>
@@ -515,6 +571,7 @@ export const CashTab: React.FC = () => {
                   step="any"
                   value={receivedAmount}
                   onChange={(e) => setReceivedAmount(e.target.value)}
+                  placeholder={receivedCurrency === 'USD' ? 'Например: 50' : '0'}
                   className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
                 />
               </div>
@@ -691,15 +748,26 @@ export const CashTab: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 print:hidden">
           {/* Petty Cash */}
           <form onSubmit={handlePettySubmit} className="lg:col-span-5 ops-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Wallet
-                className="w-4 h-4 shrink-0"
-                strokeWidth={1.75}
-                style={{ color: 'var(--tone-amber-fg)' }}
-              />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                Хозрасходы (из Нал UZS стол)
-              </h2>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Wallet
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-amber-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Хозрасходы (из Нал UZS стол)
+                </h2>
+              </div>
+              {isDemoMode && (
+                <button
+                  type="button"
+                  onClick={fillDemoPettyExample}
+                  className="px-2 py-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] transition-colors"
+                >
+                  Подставить пример
+                </button>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -710,6 +778,7 @@ export const CashTab: React.FC = () => {
                   onChange={(e) => setPettyCategory(e.target.value)}
                   className="ops-input w-full px-3 py-2.5 text-xs"
                 >
+                  <option value="">Выберите категорию (напр. Вода Hydrolife)</option>
                   <option value="Вода Hydrolife">Вода Hydrolife</option>
                   <option value="Тапочки">Тапочки</option>
                   <option value="Химия">Бытовая химия</option>
@@ -725,7 +794,7 @@ export const CashTab: React.FC = () => {
                   step="1000"
                   value={pettyAmount}
                   onChange={(e) => setPettyAmount(e.target.value)}
-                  placeholder="60000"
+                  placeholder="Например: 60000"
                   className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-xs"
                 />
               </div>
@@ -809,6 +878,7 @@ export const CashTab: React.FC = () => {
                   step="50000"
                   value={safeUzs}
                   onChange={(e) => setSafeUzs(e.target.value)}
+                  placeholder="Например: 1000000"
                   className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
                 />
               </div>
@@ -819,6 +889,7 @@ export const CashTab: React.FC = () => {
                   min="0"
                   value={safeUsd}
                   onChange={(e) => setSafeUsd(e.target.value)}
+                  placeholder="Например: 100"
                   className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
                 />
               </div>
@@ -829,6 +900,7 @@ export const CashTab: React.FC = () => {
                   min="0"
                   value={safeEur}
                   onChange={(e) => setSafeEur(e.target.value)}
+                  placeholder="0"
                   className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
                 />
               </div>
@@ -921,13 +993,24 @@ export const CashTab: React.FC = () => {
           </div>
 
           <section className="ops-card p-5 space-y-5">
-            <div>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                Пересчёт купюр за 60 секунд
-              </h2>
-              <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                Используйте кнопки − / + или введите количество купюр каждого номинала
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Пересчёт купюр за 60 секунд
+                </h2>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Используйте кнопки − / + или введите количество купюр каждого номинала
+                </p>
+              </div>
+              {isDemoMode && (
+                <button
+                  type="button"
+                  onClick={fillDemoDenomExample}
+                  className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-[11px] font-medium text-[var(--text-secondary)] transition-colors"
+                >
+                  Подставить пример
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -1324,40 +1407,164 @@ export const CashTab: React.FC = () => {
             </div>
           </section>
 
-          {/* Print & Export Card */}
-          <section className="ops-card p-5 flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                Акт передачи смены (Z-отчёт) и отправка в Telegram
-              </h2>
-              <p className="text-xs text-[var(--text-muted)]">
-                Печатная форма автоматически оформляется в чёрно-белом стиле для термо- или
-                лазерного принтера независимо от текущей темы экрана.
-              </p>
+          {/* Print & Export Card (Z-Report + UTF-8 BOM CSV Exports) */}
+          <section className="ops-card p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Акт передачи смены (Z-отчёт), CSV для бухгалтерии и Telegram
+                </h2>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Печатная форма оформляется в чёрно-белом стиле для термо-/лазерного принтера; CSV
+                  выгружается в UTF-8 BOM (открывается в Excel без кракозябр).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintZReport}
+                  className="px-4 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-2 transition-colors"
+                >
+                  <Printer className="w-4 h-4" strokeWidth={1.75} />
+                  Печать / PDF акта смены
+                </button>
+                <CopyButton
+                  text={telegramShiftReportText}
+                  label="Скопировать отчёт смены"
+                  variant="primary"
+                  size="md"
+                  onCopied={() =>
+                    pushToast(
+                      'Отчёт смены скопирован для Telegram',
+                      'Включены все 6 карманов, сверка и турсбор РУз',
+                      'emerald'
+                    )
+                  }
+                />
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+
+            <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={handlePrintZReport}
-                className="px-4 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-2 transition-colors"
+                data-testid="export-tourist-tax-csv"
+                onClick={() => {
+                  const csv = buildTouristTaxCsv(state);
+                  triggerCsvDownload(`topchan-tourist-tax-${getTashkentTodayIso()}.csv`, csv);
+                  pushToast('Экспорт турсбора (CSV)', 'Реестр E-mehmon / БРВ РУз скачан', 'emerald');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors"
               >
-                <Printer className="w-4 h-4" strokeWidth={1.75} />
-                Печать / PDF акта смены
+                <Download className="w-3.5 h-3.5 text-[var(--tone-emerald-fg)]" strokeWidth={1.75} />
+                Турсбор РУз (CSV)
               </button>
-              <CopyButton
-                text={telegramShiftReportText}
-                label="Скопировать отчёт смены"
-                variant="primary"
-                size="md"
-                onCopied={() =>
+              <button
+                type="button"
+                data-testid="export-pnl-csv"
+                onClick={() => {
+                  const csv = buildCashPnlCsv(state);
+                  triggerCsvDownload(`topchan-cash-pnl-${getTashkentTodayIso()}.csv`, csv);
+                  pushToast('Экспорт P&L кассы (CSV)', 'Сводка 6 карманов и операций скачана', 'emerald');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-[var(--tone-cobalt-fg)]" strokeWidth={1.75} />
+                P&L 6 карманов (CSV)
+              </button>
+              <button
+                type="button"
+                data-testid="export-shifts-csv"
+                onClick={() => {
+                  const csv = buildShiftArchiveCsv(state.shiftHistory ?? []);
+                  triggerCsvDownload(`topchan-shifts-${getTashkentTodayIso()}.csv`, csv);
                   pushToast(
-                    'Отчёт смены скопирован для Telegram',
-                    'Включены все 6 карманов, сверка и турсбор РУз',
+                    'Экспорт архива смен (CSV)',
+                    `Выгружено смен: ${(state.shiftHistory ?? []).length}`,
                     'emerald'
-                  )
-                }
-              />
+                  );
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-[var(--tone-amber-fg)]" strokeWidth={1.75} />
+                Архив смен (CSV)
+              </button>
             </div>
+          </section>
+
+          {/* Shift History Archive (Night Audit Records) */}
+          <section className="ops-card p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <History
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--brand-primary)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Архив закрытых смен (Ночной аудит)
+                </h2>
+              </div>
+              <StatusPill tone="neutral" mono>
+                {(state.shiftHistory ?? []).length} смен
+              </StatusPill>
+            </div>
+
+            {(state.shiftHistory ?? []).length === 0 ? (
+              <EmptyState
+                icon={History}
+                title="Архив смен пока пуст"
+                description="После прохождения мастера «Ночной аудит» снимок смены и 6 карманов кассы сохранится здесь."
+              />
+            ) : (
+              <div className="overflow-x-auto border border-[var(--border-subtle)] rounded-xl">
+                <table className="w-full text-left border-collapse min-w-[680px]">
+                  <thead>
+                    <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-strong)] text-xs font-semibold text-[var(--text-secondary)]">
+                      <th className="py-2.5 px-3.5 whitespace-nowrap">Дата смены</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Дежурный</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap text-right">Загрузка</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap text-right">No-Show</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap text-right">Турсбор РУз</th>
+                      <th className="py-2.5 px-3.5 whitespace-nowrap">Касса и заметки</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-subtle)] text-xs bg-[var(--bg-surface)]">
+                    {(state.shiftHistory ?? []).map((rec) => (
+                      <tr key={rec.id} className="hover:bg-[var(--bg-hover)]/45 transition-colors">
+                        <td className="py-2.5 px-3.5 font-mono tabular-nums font-semibold text-[var(--text-primary)] whitespace-nowrap">
+                          {rec.businessDate}
+                        </td>
+                        <td className="py-2.5 px-3 text-[var(--text-secondary)] whitespace-nowrap">
+                          {rec.actor}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[var(--text-primary)] whitespace-nowrap">
+                          {rec.occupiedUnits}/{rec.totalUnits}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[var(--text-secondary)] whitespace-nowrap">
+                          {rec.noShowCancelledCount}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-[var(--tone-emerald-fg)] whitespace-nowrap">
+                          {formatUzs(rec.touristTaxUzs)}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-[var(--text-muted)]">
+                          <div className="font-mono tabular-nums text-[var(--text-secondary)]">
+                            ${rec.pocketsSnapshot.find((p) => p.id === 'cash_usd')?.balance ?? 0} ·{' '}
+                            {formatUzs(
+                              rec.pocketsSnapshot.find((p) => p.id === 'cash_uzs')?.balance ?? 0
+                            )}
+                          </div>
+                          {rec.notes && (
+                            <div className="text-[11px] text-[var(--text-muted)] truncate max-w-[260px]">
+                              {rec.notes}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </div>
       )}

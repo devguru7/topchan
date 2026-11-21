@@ -43,7 +43,10 @@ export function parseRussianReceptionCommand(
 
   for (const alias of ROOM_ALIASES) {
     for (const kw of alias.keywords) {
-      const regex = new RegExp(`(?:^|[\\s,])${kw}(?:[\\s#-]*(\\d+))?`, 'i');
+      const regex = new RegExp(
+        `(?:^|[\\s,])${kw}(?:[\\s#-]*(\\d+))?(?=$|[\\s,.;:!?])`,
+        'i'
+      );
       const m = lower.match(regex);
       if (m) {
         matchedCategory = categories.find(
@@ -92,22 +95,22 @@ export function parseRussianReceptionCommand(
   }
 
   // 2. Parse nights
-  const nightsMatch = lower.match(/(\d+)\s*(?:ноч|сут|night)/i);
+  const nightsMatch = lower.match(/(\d+)\s*(?:ноч[а-яё]*|сут[а-яё]*|night[a-z]*)/i);
   const nights = nightsMatch ? Math.max(1, parseInt(nightsMatch[1], 10)) : 1;
 
-  // 3. Parse extras
+  // 3. Parse extras (Cyrillic-safe [а-яёa-z]* instead of JS ASCII-only \w*)
   const extras: ParsedCommand['extras'] = [];
-  if (/быстр\w*\s*стирк|стирк\w*\s*22/i.test(lower)) {
+  if (/быстр[а-яёa-z]*\s*стирк[а-яёa-z]*|стирк[а-яёa-z]*\s*22/i.test(lower)) {
     extras.push({ type: 'laundry_fast', label: 'Быстрая стирка (22 мин)', priceUsd: 2 });
-  } else if (/средн\w*\s*стирк|стирк\w*\s*55/i.test(lower)) {
+  } else if (/средн[а-яёa-z]*\s*стирк[а-яёa-z]*|стирк[а-яёa-z]*\s*55/i.test(lower)) {
     extras.push({ type: 'laundry_medium', label: 'Средняя стирка (55 мин)', priceUsd: 3 });
-  } else if (/стирк/i.test(lower)) {
+  } else if (/стирк[а-яёa-z]*/i.test(lower)) {
     extras.push({ type: 'laundry_fast', label: 'Быстрая стирка (22 мин)', priceUsd: 2 });
   }
-  if (/поздн\w*\s*завтрак|завтрак/i.test(lower)) {
+  if (/поздн[а-яёa-z]*\s*завтрак[а-яёa-z]*|завтрак[а-яёa-z]*/i.test(lower)) {
     extras.push({ type: 'late_breakfast', label: 'Поздний завтрак', priceUsd: 2 });
   }
-  if (/ранн\w*\s*заезд|поздн\w*\s*выезд/i.test(lower)) {
+  if (/ранн[а-яёa-z]*\s*заезд[а-яёa-z]*|поздн[а-яёa-z]*\s*выезд[а-яёa-z]*/i.test(lower)) {
     const rate = matchedCategory?.pricesUsd[1] ?? 18;
     extras.push({
       type: 'early_late',
@@ -122,11 +125,11 @@ export function parseRussianReceptionCommand(
 
   const usdMatch =
     raw.match(/\$\s*(\d+(?:[.,]\d+)?)/i) ??
-    raw.match(/(\d+(?:[.,]\d+)?)\s*(?:\$|долл|usd|бакс)/i);
+    raw.match(/(\d+(?:[.,]\d+)?)\s*(?:\$|долл[а-яё]*|usd|бакс[а-яё]*)/i);
   const eurMatch =
     raw.match(/€\s*(\d+(?:[.,]\d+)?)/i) ??
     raw.match(/(\d+(?:[.,]\d+)?)\s*(?:€|евро|eur)/i);
-  const uzsMatch = raw.match(/(\d[\d\s]{2,})\s*(?:сум|uzs|тыс)/i);
+  const uzsMatch = raw.match(/(\d[\d\s]{2,})\s*(?:сум[а-яё]*|uzs|тыс)/i);
 
   if (usdMatch) {
     paidCurrency = 'USD';
@@ -141,7 +144,7 @@ export function parseRussianReceptionCommand(
   }
 
   // 5. Parse change currency preference
-  const changeCurrency: 'UZS' | 'USD' = /сдач\w*\s*(?:доллар|usd|\$)/i.test(lower)
+  const changeCurrency: 'UZS' | 'USD' = /сдач[а-яёa-z]*\s*(?:доллар[а-яё]*|usd|\$)/i.test(lower)
     ? 'USD'
     : 'UZS';
 
@@ -152,11 +155,19 @@ export function parseRussianReceptionCommand(
     .filter(Boolean);
 
   let guestName = 'Гость (Walk-in)';
-  const skipPattern =
-    /(смолл|смол|small|йеллоу|желт|жёлт|yellow|оранж|orange|пинк|розов|pink|виолет|фиолет|violet|ред|красн|red|грин|зелен|зелён|green|блю|син|семейн|blue|микс|mix|сикс|six|шестер|шестёр|фем|женск|fem|\d+\s*(ноч|сут|night)|дал|оплат|сдач|стирк|завтрак|заезд|выезд|\$|€|сум|usd|uzs|eur)/i;
+  const allRoomKeywords = ROOM_ALIASES.flatMap((a) => a.keywords).join('|');
+  const roomKeywordBoundaryRe = new RegExp(
+    `(?:^|[\\s,])(?:${allRoomKeywords})(?:[\\s#-]*\\d+)?(?=$|[\\s,.;:!?])`,
+    'i'
+  );
+  const nonNameMetaRe =
+    /(\d+\s*(?:ноч[а-яё]*|сут[а-яё]*|night[a-z]*)|(?:^|[\s,])(?:дал|дала|оплат[а-яё]*|сдач[а-яё]*|стирк[а-яё]*|завтрак[а-яё]*|заезд[а-яё]*|выезд[а-яё]*)(?=$|[\s,.;:!?])|\$|€|сум|usd|uzs|eur)/i;
+
+  const isSkipSegment = (segment: string): boolean =>
+    roomKeywordBoundaryRe.test(segment) || nonNameMetaRe.test(segment);
 
   for (const part of parts) {
-    if (!skipPattern.test(part) && part.length >= 2) {
+    if (!isSkipSegment(part) && part.length >= 2) {
       guestName = part
         .split(/\s+/)
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -167,7 +178,7 @@ export function parseRussianReceptionCommand(
   if (guestName === 'Гость (Walk-in)' && matchedTokenEnd > 0 && parts.length === 1) {
     const remainder = raw.slice(matchedTokenEnd).trim();
     const cleaned = remainder.replace(/[\d$€.,]+.*$/, '').trim();
-    if (cleaned.length >= 2 && !skipPattern.test(cleaned)) {
+    if (cleaned.length >= 2 && !isSkipSegment(cleaned)) {
       guestName = cleaned;
     }
   }
