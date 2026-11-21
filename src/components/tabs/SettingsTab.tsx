@@ -4,16 +4,23 @@ import {
   Bell,
   Bot,
   Chrome,
+  Copy,
+  Database,
   Download,
   FileJson,
   FileSpreadsheet,
+  Loader2,
   Plus,
   RotateCcw,
   Save,
   Settings,
   Shield,
+  Sparkles,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
+import type { GuestLang } from '../../types/ops';
+import { generateGuestReplySmart } from '../../services/aiService';
+import { getTashkentTodayIso } from '../../utils/time';
 import {
   calcDefaultAccRate,
   calcDefaultExRate,
@@ -36,7 +43,9 @@ function triggerFileDownload(filename: string, content: string, mime: string) {
 export const SettingsTab: React.FC = () => {
   const {
     state,
+    storageKind,
     executeTelegramAction,
+    updateTelegramAlertDraft,
     addPhysicalRoom,
     archivePhysicalRoom,
     updateCategoryPrice,
@@ -84,10 +93,33 @@ export const SettingsTab: React.FC = () => {
   ]);
 
   const [showResolvedAlerts, setShowResolvedAlerts] = useState(false);
+  const [draftLangByAlert, setDraftLangByAlert] = useState<Record<string, GuestLang>>({});
+  const [draftingAlertId, setDraftingAlertId] = useState<string | null>(null);
 
   const visibleAlerts = showResolvedAlerts
     ? state.telegramAlerts
     : state.telegramAlerts.filter((a) => !a.resolved);
+
+  const handleGenerateReply = async (alertId: string, title: string, body: string) => {
+    const lang = draftLangByAlert[alertId] ?? 'ru';
+    setDraftingAlertId(alertId);
+    try {
+      const res = await generateGuestReplySmart({
+        guestMessage: `${title}. ${body}`,
+        lang,
+        wifiPass: state.integrations.wifiPass,
+        doorCode: state.integrations.doorCode,
+      });
+      updateTelegramAlertDraft(alertId, res.reply);
+      pushToast(
+        'AI-черновик готов',
+        `Язык ${lang.toUpperCase()} · ${res.engine === 'gemini' ? 'Gemini AI' : 'Локальный движок'}`,
+        'cobalt'
+      );
+    } finally {
+      setDraftingAlertId(null);
+    }
+  };
 
   const activePhysicalCount = state.physicalRooms.filter((r) => !r.archived).length;
   const monthlyTaxUzs = calcMonthlyTouristTaxUzs(
@@ -142,7 +174,7 @@ export const SettingsTab: React.FC = () => {
 
   const handleExportJson = () => {
     triggerFileDownload(
-      `topchan-ops-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      `topchan-ops-backup-${getTashkentTodayIso()}.json`,
       JSON.stringify(state, null, 2),
       'application/json;charset=utf-8'
     );
@@ -162,7 +194,7 @@ export const SettingsTab: React.FC = () => {
     ]);
     const csv = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     triggerFileDownload(
-      `topchan-cash-ledger-${new Date().toISOString().slice(0, 10)}.csv`,
+      `topchan-cash-ledger-${getTashkentTodayIso()}.csv`,
       csv,
       'text/csv;charset=utf-8'
     );
@@ -265,12 +297,65 @@ export const SettingsTab: React.FC = () => {
                     <p className="text-xs text-slate-300 mt-1 leading-relaxed">{alert.body}</p>
                   </div>
 
+                  {/* Multilingual AI Reply Drafter Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <div className="flex items-center gap-1 p-0.5 bg-[#121826] border border-white/[0.08] rounded-lg">
+                      {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((lang) => {
+                        const selected = (draftLangByAlert[alert.id] ?? 'ru') === lang;
+                        return (
+                          <button
+                            key={lang}
+                            type="button"
+                            onClick={() =>
+                              setDraftLangByAlert((prev) => ({ ...prev, [alert.id]: lang }))
+                            }
+                            className={`px-2 py-0.5 rounded-md text-xs font-mono uppercase transition-colors ${
+                              selected
+                                ? 'bg-[#3B82F6] text-white font-semibold'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {lang}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={draftingAlertId === alert.id}
+                      onClick={() => handleGenerateReply(alert.id, alert.title, alert.body)}
+                      className="px-3 py-1.5 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-medium text-white border border-white/[0.08] inline-flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {draftingAlertId === alert.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#3B82F6]" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-[#3B82F6]" />
+                      )}
+                      AI-черновик ответа
+                    </button>
+                  </div>
+
                   {alert.draftReply && (
-                    <div className="p-3 rounded-lg bg-[#121826] border border-white/[0.08] space-y-1">
-                      <div className="text-xs font-medium text-[#3B82F6]">
-                        AI-черновик ответа гостю:
+                    <div className="p-3 rounded-lg bg-[#121826] border border-white/[0.08] space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-[#3B82F6]">
+                          AI-черновик ответа гостю:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(alert.draftReply ?? '').catch(() => {});
+                            pushToast('Черновик скопирован', 'Можно вставить в чат с гостем', 'emerald');
+                          }}
+                          className="text-xs text-slate-300 hover:text-white inline-flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" />
+                          Копировать
+                        </button>
                       </div>
-                      <p className="text-xs text-slate-200 leading-relaxed">{alert.draftReply}</p>
+                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-line">
+                        {alert.draftReply}
+                      </p>
                     </div>
                   )}
 
@@ -514,11 +599,17 @@ export const SettingsTab: React.FC = () => {
           onSubmit={handleSaveIntegrations}
           className="bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4"
         >
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-[#3B82F6]" />
-            <h2 className="text-sm font-semibold text-white">
-              Bnovo API v1, Яндекс IMAP и коды доступа
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-[#3B82F6]" />
+              <h2 className="text-sm font-semibold text-white">
+                Bnovo API v1, Яндекс IMAP и коды доступа
+              </h2>
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-300">
+              <Database className="w-3.5 h-3.5 text-[#10B981]" />
+              {storageKind === 'supabase' ? 'Supabase Cloud' : 'LocalStorage (офлайн)'}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

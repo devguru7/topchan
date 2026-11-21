@@ -3,17 +3,26 @@ import { motion } from 'motion/react';
 import {
   AlertCircle,
   BedDouble,
+  CalendarRange,
   CheckCircle2,
   Clock,
+  LayoutGrid,
   Plus,
+  QrCode,
   Search,
   Sparkles,
   UserPlus,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
 import { calcBookingTotals, formatUsd } from '../../utils/math';
+import {
+  formatShortDateColumn,
+  getDateRangeIso,
+  getTashkentTodayIso,
+} from '../../utils/time';
 
 type GridFilter = 'all' | 'available' | 'occupied' | 'checkout' | 'debt' | 'dirty';
+type GridViewMode = 'cards' | 'tape';
 
 const FILTERS: Array<{ id: GridFilter; label: string }> = [
   { id: 'all', label: 'Все' },
@@ -28,13 +37,18 @@ export const GridTab: React.FC = () => {
   const {
     state,
     openCheckInModal,
+    openQrPosterModal,
     setSelectedBookingId,
     setActiveTab,
     pushToast,
   } = useOps();
 
+  const [viewMode, setViewMode] = useState<GridViewMode>('cards');
   const [filter, setFilter] = useState<GridFilter>('all');
   const [search, setSearch] = useState('');
+
+  const todayIso = useMemo(() => getTashkentTodayIso(), []);
+  const tapeDates = useMemo(() => getDateRangeIso(todayIso, 14), [todayIso]);
 
   const activeRooms = useMemo(
     () => state.physicalRooms.filter((r) => !r.archived),
@@ -151,6 +165,50 @@ export const GridTab: React.FC = () => {
     return false;
   }, [groupedCategories, activeBookingMap, filter, query]);
 
+  // Flat rows for 14-day Tape Chart
+  const tapeRows = useMemo(() => {
+    const rows: Array<{
+      key: string;
+      roomId: string;
+      bedId?: string;
+      label: string;
+      subLabel: string;
+      colorHex: string;
+      status: string;
+    }> = [];
+    for (const { category, rooms } of groupedCategories) {
+      for (const room of rooms) {
+        if (room.beds) {
+          for (const bed of room.beds) {
+            const b = activeBookingMap.get(`${room.id}:${bed.id}`);
+            if (!matchesUnit(`${room.code} ${bed.label}`, bed.status, b)) continue;
+            rows.push({
+              key: `${room.id}:${bed.id}`,
+              roomId: room.id,
+              bedId: bed.id,
+              label: `${room.code} ${bed.label}`,
+              subLabel: bed.tier,
+              colorHex: category.colorHex,
+              status: bed.status,
+            });
+          }
+        } else {
+          const b = activeBookingMap.get(room.id);
+          if (!matchesUnit(room.code, room.status, b)) continue;
+          rows.push({
+            key: room.id,
+            roomId: room.id,
+            label: room.code,
+            subLabel: category.shortName,
+            colorHex: category.colorHex,
+            status: room.status,
+          });
+        }
+      }
+    }
+    return rows;
+  }, [groupedCategories, activeBookingMap, filter, query]);
+
   return (
     <div className="space-y-6">
       {/* Header Row */}
@@ -160,17 +218,67 @@ export const GridTab: React.FC = () => {
             Шахматка номерного фонда
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Клик по свободной комнате — быстрое заселение · клик по занятой — фолио и расчёт
+            Клик по свободной комнате или дате — быстрое заселение · клик по брони — фолио и расчёт
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => openCheckInModal()}
-          className="px-4 py-2.5 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
-        >
-          <UserPlus className="w-4 h-4" />
-          Заселить гостя
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Animated View Switcher */}
+          <div
+            role="tablist"
+            aria-label="Режим отображения шахматки"
+            className="flex items-center gap-1 p-1 bg-[#121826] border border-white/[0.08] rounded-xl"
+          >
+            {(
+              [
+                { id: 'cards', label: 'Карточки сегодня', icon: LayoutGrid },
+                { id: 'tape', label: 'Шахматка 14 дней', icon: CalendarRange },
+              ] as const
+            ).map((mode) => {
+              const active = viewMode === mode.id;
+              const Icon = mode.icon;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setViewMode(mode.id)}
+                  className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                    active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="gridViewMode"
+                      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+                      className="absolute inset-0 bg-[#1A2234] border border-white/[0.12] rounded-lg"
+                    />
+                  )}
+                  <Icon className="w-3.5 h-3.5 relative z-10" />
+                  <span className="relative z-10">{mode.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openQrPosterModal()}
+            className="px-3 py-2.5 rounded-lg bg-[#121826] hover:bg-[#1A2234] border border-white/[0.08] text-slate-200 text-xs font-semibold transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            <QrCode className="w-4 h-4 text-[#10B981]" />
+            QR-постеры
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openCheckInModal()}
+            className="px-4 py-2.5 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+          >
+            <UserPlus className="w-4 h-4" />
+            Заселить гостя
+          </button>
+        </div>
       </div>
 
       {/* Top KPI Strip */}
@@ -288,6 +396,187 @@ export const GridTab: React.FC = () => {
         </div>
       </div>
 
+      {/* 14-Day Horizontal Tape Chart Mode */}
+      {viewMode === 'tape' && hasVisibleResults && (
+        <div className="bg-[#121826] border border-white/[0.08] rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-300 font-medium">
+              <CalendarRange className="w-4 h-4 text-[#3B82F6]" />
+              <span>Горизонтальная шахматка на 14 дней (Ташкент UZT)</span>
+            </div>
+            <div className="flex items-center gap-3 text-slate-400">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs bg-[#10B981]/80" /> Оплачено
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs bg-[#F59E0B]/80" /> Выезд 12:00
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs bg-[#F43F5E]/80" /> Долг
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <div className="min-w-[1260px]">
+              {/* Date Column Header */}
+              <div
+                className="grid border-b border-white/[0.08] bg-[#0B0F17]"
+                style={{ gridTemplateColumns: '188px repeat(14, minmax(76px, 1fr))' }}
+              >
+                <div className="sticky left-0 z-20 bg-[#0B0F17] px-3 py-2.5 text-xs font-semibold text-slate-400 border-r border-white/[0.08]">
+                  Комната / Койка
+                </div>
+                {tapeDates.map((iso, idx) => {
+                  const col = formatShortDateColumn(iso);
+                  const isToday = idx === 0;
+                  return (
+                    <div
+                      key={iso}
+                      className={`px-2 py-2 text-center border-r border-white/[0.05] ${
+                        isToday
+                          ? 'bg-[#10B981]/12 text-[#10B981]'
+                          : col.isWeekend
+                            ? 'bg-white/[0.02] text-slate-300'
+                            : 'text-slate-400'
+                      }`}
+                    >
+                      <div className="text-[11px] font-semibold uppercase">{col.weekday}</div>
+                      <div className="text-xs font-mono tabular-nums font-bold">{col.dayMonth}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Room / Bed Rows */}
+              <div className="divide-y divide-white/[0.06]">
+                {tapeRows.map((row) => {
+                  const rowSegments = state.bookings
+                    .filter((b) => b.status === 'active')
+                    .flatMap((b) =>
+                      b.segments
+                        .filter(
+                          (seg) =>
+                            seg.roomId === row.roomId &&
+                            (row.bedId ? seg.bedId === row.bedId : !seg.bedId)
+                        )
+                        .map((seg) => ({ booking: b, segment: seg }))
+                    );
+
+                  const windowStart = tapeDates[0];
+                  const windowEndExclusive = (() => {
+                    const last = new Date(`${tapeDates[tapeDates.length - 1]}T12:00:00Z`);
+                    last.setUTCDate(last.getUTCDate() + 1);
+                    return last.toISOString().slice(0, 10);
+                  })();
+
+                  return (
+                    <div
+                      key={row.key}
+                      className="grid relative items-stretch min-h-[48px] hover:bg-white/[0.015]"
+                      style={{ gridTemplateColumns: '188px repeat(14, minmax(76px, 1fr))' }}
+                    >
+                      {/* Sticky Left Room Label */}
+                      <div className="sticky left-0 z-10 bg-[#121826] px-3 py-2 border-r border-white/[0.08] flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2 h-6 rounded-xs shrink-0"
+                          style={{ backgroundColor: row.colorHex }}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-white truncate">
+                            {row.label}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">
+                            {row.status === 'dirty' ? 'На уборке' : row.subLabel}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 14 Clickable Day Cells */}
+                      {tapeDates.map((iso, idx) => (
+                        <button
+                          key={iso}
+                          type="button"
+                          onClick={() =>
+                            openCheckInModal({
+                              roomId: row.roomId,
+                              bedId: row.bedId,
+                              fromDate: iso,
+                            })
+                          }
+                          title={`Заселить в ${row.label} с ${iso}`}
+                          className={`border-r border-white/[0.05] h-full min-h-[48px] transition-colors hover:bg-[#10B981]/12 focus:outline-none ${
+                            idx === 0 ? 'bg-[#10B981]/[0.04]' : ''
+                          }`}
+                        />
+                      ))}
+
+                      {/* Overlay Spanning Booking Bars */}
+                      <div
+                        className="pointer-events-none absolute inset-y-1.5 right-0 grid"
+                        style={{
+                          left: '188px',
+                          gridTemplateColumns: 'repeat(14, minmax(76px, 1fr))',
+                        }}
+                      >
+                        {rowSegments.map(({ booking, segment }) => {
+                          if (segment.toDate <= windowStart || segment.fromDate >= windowEndExclusive) {
+                            return null;
+                          }
+                          const startIdx = Math.max(
+                            0,
+                            tapeDates.findIndex((d) => d >= segment.fromDate)
+                          );
+                          const endIdxRaw = tapeDates.findIndex((d) => d >= segment.toDate);
+                          const endIdx = endIdxRaw === -1 ? 14 : endIdxRaw;
+                          const spanCols = Math.max(1, endIdx - startIdx);
+                          const fin = calcBookingTotals(booking);
+                          const guest = booking.guests[0];
+                          const isVip =
+                            guest &&
+                            state.guestProfiles.some(
+                              (p) => p.passportNo === guest.passportNo && p.tag === 'vip'
+                            );
+
+                          const barTone =
+                            fin.debtUsd > 0
+                              ? 'bg-[#F43F5E]/25 border-[#F43F5E]/60 text-rose-100 hover:bg-[#F43F5E]/35'
+                              : booking.checkingOutToday
+                                ? 'bg-[#F59E0B]/25 border-[#F59E0B]/60 text-amber-100 hover:bg-[#F59E0B]/35'
+                                : 'bg-[#10B981]/25 border-[#10B981]/55 text-emerald-100 hover:bg-[#10B981]/35';
+
+                          return (
+                            <button
+                              key={segment.id}
+                              type="button"
+                              onClick={() => setSelectedBookingId(booking.id)}
+                              style={{
+                                gridColumn: `${startIdx + 1} / span ${spanCols}`,
+                              }}
+                              className={`pointer-events-auto mx-1 rounded-lg border px-2 py-1 text-left flex items-center justify-between gap-1.5 overflow-hidden transition-colors ${barTone}`}
+                            >
+                              <span className="flex items-center gap-1 text-xs font-semibold truncate">
+                                {isVip && <Sparkles className="w-3 h-3 text-[#F59E0B] shrink-0" />}
+                                <span className="truncate">{guest?.fullName ?? 'Гость'}</span>
+                              </span>
+                              {fin.debtUsd > 0 && (
+                                <span className="font-mono text-[11px] font-bold text-[#F43F5E] shrink-0 tabular-nums">
+                                  −${fin.debtUsd}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Empty Search/Filter State */}
       {!hasVisibleResults && (
         <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-8 text-center space-y-3">
@@ -306,6 +595,7 @@ export const GridTab: React.FC = () => {
       )}
 
       {/* Category-Grouped Bento Grid */}
+      {viewMode === 'cards' && (
       <div className="space-y-6">
         {groupedCategories.map(({ category, rooms }) => {
           // Check if category has any matching rooms/beds
@@ -493,6 +783,7 @@ export const GridTab: React.FC = () => {
           );
         })}
       </div>
+      )}
 
       {/* Dorms Legend Footer */}
       <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-white/[0.06]">

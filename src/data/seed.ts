@@ -1,8 +1,9 @@
 import type { AppState, DormBed } from '../types/ops';
 import { calcDefaultAccRate, calcDefaultExRate } from '../utils/math';
+import { addDaysIso, formatTashkentDateRu, getTashkentTodayIso } from '../utils/time';
 
-export const SCHEMA_VERSION = 2;
-export const STORAGE_KEY = 'topchan_ops_state_v2';
+export const SCHEMA_VERSION = 3;
+export const STORAGE_KEY = 'topchan_ops_state_v3';
 
 export const FALLBACK_CBU_USD = 12004.48;
 export const FALLBACK_CBU_EUR = 13280.68;
@@ -17,14 +18,14 @@ function makeDormBeds(prefix: string, occupiedBeds: number[] = []): DormBed[] {
   }));
 }
 
-export function createSeedState(): AppState {
+export function createSeedState(baseDateIso?: string): AppState {
   const propertyId = 'topchan-tashkent-01';
-  const today = '2026-11-20';
-  const yesterday = '2026-11-19';
-  const twoDaysAgo = '2026-11-18';
-  const tomorrow = '2026-11-21';
-  const plus2 = '2026-11-22';
-  const plus3 = '2026-11-23';
+  const today = baseDateIso ?? getTashkentTodayIso();
+  const yesterday = addDaysIso(today, -1);
+  const twoDaysAgo = addDaysIso(today, -2);
+  const tomorrow = addDaysIso(today, 1);
+  const plus2 = addDaysIso(today, 2);
+  const plus3 = addDaysIso(today, 3);
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -1012,7 +1013,7 @@ export function createSeedState(): AppState {
       cbuUsd: FALLBACK_CBU_USD,
       cbuEur: FALLBACK_CBU_EUR,
       cbuStatus: 'cache',
-      cbuUpdatedAt: '20.11.2026',
+      cbuUpdatedAt: formatTashkentDateRu(),
       accRate: calcDefaultAccRate(FALLBACK_CBU_USD), // 12 200
       accManualOverride: false,
       exRate: calcDefaultExRate(FALLBACK_CBU_USD), // 11 800

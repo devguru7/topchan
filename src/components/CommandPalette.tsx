@@ -6,6 +6,7 @@ import {
   BedDouble,
   Command,
   Mic,
+  MicOff,
   Search,
   Sparkles,
   UserPlus,
@@ -15,6 +16,7 @@ import {
 import { useOps } from '../context/OpsContext';
 import { COMMAND_PRESETS, parseRussianReceptionCommand } from '../utils/commandParser';
 import { formatUsd, formatUzs } from '../utils/math';
+import { useVoiceDictation } from '../hooks/useVoiceDictation';
 
 export const CommandPalette: React.FC = () => {
   const {
@@ -29,17 +31,21 @@ export const CommandPalette: React.FC = () => {
   } = useOps();
 
   const [query, setQuery] = useState('');
-  const [dictating, setDictating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const voice = useVoiceDictation({
+    onTranscript: (text) => setQuery(text),
+    onStatusMessage: (msg, tone) => pushToast('Голосовой ввод', msg, tone),
+  });
 
   useEffect(() => {
     if (commandPaletteOpen) {
       setTimeout(() => inputRef.current?.focus(), 40);
     } else {
       setQuery('');
-      setDictating(false);
+      voice.stop();
     }
-  }, [commandPaletteOpen]);
+  }, [commandPaletteOpen, voice.stop]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -83,19 +89,10 @@ export const CommandPalette: React.FC = () => {
       .slice(0, 4);
   }, [query, state.bookings, state.physicalRooms]);
 
-  const handleVoiceDemo = () => {
-    setDictating(true);
-    pushToast('Голосовой ввод активен', 'Распознаём фразу администратора...', 'cobalt');
-    window.setTimeout(() => {
-      setQuery(COMMAND_PRESETS[0]);
-      setDictating(false);
-    }, 600);
-  };
-
   const handleCommit = () => {
     if (!parsed) return;
-    commitParsedCommand(parsed);
-    setCommandPaletteOpen(false);
+    const ok = commitParsedCommand(parsed);
+    if (ok) setCommandPaletteOpen(false);
   };
 
   return (
@@ -136,16 +133,16 @@ export const CommandPalette: React.FC = () => {
               />
               <button
                 type="button"
-                onClick={handleVoiceDemo}
+                onClick={voice.toggle}
                 aria-label="Голосовая диктовка"
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                  dictating
+                  voice.isListening
                     ? 'bg-[#F43F5E]/20 text-[#F43F5E] border border-[#F43F5E]/40'
                     : 'bg-[#1A2234] text-slate-300 hover:text-white border border-white/[0.08]'
                 }`}
               >
-                <Mic className="w-3.5 h-3.5" />
-                {dictating ? 'Слушаю...' : 'Голос'}
+                {voice.isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                {voice.isListening ? 'Стоп...' : 'Голос'}
               </button>
               <button
                 type="button"
@@ -156,6 +153,12 @@ export const CommandPalette: React.FC = () => {
                 <X className="w-4 h-4" />
               </button>
             </div>
+            {voice.isListening && (
+              <div className="px-4 py-2 bg-[#F43F5E]/10 border-b border-[#F43F5E]/25 text-xs text-rose-200 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#F43F5E] animate-ping" />
+                <span>Диктовка (ru-RU){voice.interimText ? `: ${voice.interimText}` : '...'}</span>
+              </div>
+            )}
 
             <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
               {/* Parsed Zero-Typing preview */}

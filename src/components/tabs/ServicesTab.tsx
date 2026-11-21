@@ -4,19 +4,22 @@ import {
   Briefcase,
   Camera,
   CheckCircle2,
+  Copy,
   FastForward,
   Minus,
   Package,
   Phone,
   Plane,
   Plus,
+  Printer,
   QrCode,
   Sparkles,
+  Star,
   WashingMachine,
   Wifi,
 } from 'lucide-react';
-import { useOps } from '../../context/OpsContext';
-import type { GuestLang, TransferStatus } from '../../types/ops';
+import { useOps, useTimers } from '../../context/OpsContext';
+import type { GuestLang, LaundryJob, TransferStatus } from '../../types/ops';
 import { formatTimer } from '../../utils/math';
 
 const QR_COPY: Record<
@@ -90,6 +93,85 @@ const TRANSFER_STATUS_LABEL: Record<TransferStatus, { text: string; color: strin
   picked_up: { text: 'Забрал', color: 'text-[#10B981]' },
 };
 
+const REVIEW_TEMPLATES: Record<GuestLang, (guest: string) => string> = {
+  ru: (guest) =>
+    `Здравствуйте, ${guest}! Спасибо, что остановились в Topchan Hostel (Ташкент).\n` +
+    `Шаг 1: Всё ли прошло идеально? Если были замечания — напишите прямо сюда, мы исправим.\n` +
+    `Шаг 2: Если вам понравилось (5★), будем очень благодарны за короткий отзыв на Google Maps: https://maps.google.com/?q=Topchan+Hostel+Tashkent`,
+  en: (guest) =>
+    `Hi ${guest}! Thank you for staying at Topchan Hostel Tashkent.\n` +
+    `Step 1: Did everything go smoothly? Reply here if anything could be improved.\n` +
+    `Step 2: If you loved your stay (5★), a quick Google Maps review means a lot to our team: https://maps.google.com/?q=Topchan+Hostel+Tashkent`,
+  uz: (guest) =>
+    `Assalomu alaykum, ${guest}! Topchan Hostel (Toshkent)da qolganingiz uchun rahmat.\n` +
+    `1-bosqich: Hammasi yoqdimi? Taklifingiz bo'lsa shu yerga yozing.\n` +
+    `2-bosqich: Agar 5★ bo'lsa, Google Mapsda qisqa fikr qoldiring: https://maps.google.com/?q=Topchan+Hostel+Tashkent`,
+  zh: (guest) =>
+    `您好 ${guest}！感谢入住塔什干 Topchan 青旅。\n` +
+    `第 1 步：入住体验是否顺利？如有任何建议请直接回复我们。\n` +
+    `第 2 步：如果您满意（5★），欢迎在 Google 地图留下简短好评：https://maps.google.com/?q=Topchan+Hostel+Tashkent`,
+};
+
+/**
+ * Isolated component subscribed to TimerContext so 1-second ticks
+ * only re-render the running laundry cards instead of the whole ServicesTab.
+ */
+const LaundryJobCard: React.FC<{
+  job: LaundryJob;
+  onSpeedUp: (jobId: string, minutes: number) => void;
+}> = ({ job, onSpeedUp }) => {
+  const { getRemainingSeconds } = useTimers();
+  const remaining = job.status === 'completed' ? 0 : getRemainingSeconds(job);
+  const pct =
+    job.totalSeconds > 0
+      ? Math.min(100, Math.round(((job.totalSeconds - remaining) / job.totalSeconds) * 100))
+      : 100;
+
+  return (
+    <div className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-white">
+            {job.roomLabel} · {job.guestName}
+          </div>
+          <div className="text-xs text-slate-400">
+            {job.mode === 'fast' ? 'Быстрая 22 мин ($2)' : 'Средняя 55 мин ($3)'}
+          </div>
+        </div>
+        <div className="text-right">
+          <div
+            className={`text-lg font-bold font-mono tabular-nums ${
+              job.status === 'completed' ? 'text-[#10B981]' : 'text-[#3B82F6]'
+            }`}
+          >
+            {job.status === 'completed' ? 'Готово!' : formatTimer(remaining)}
+          </div>
+        </div>
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-[#1A2234] overflow-hidden">
+        <div
+          className={`h-full transition-all duration-500 ${
+            job.status === 'completed' ? 'bg-[#10B981]' : 'bg-[#3B82F6]'
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {job.status === 'running' && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onSpeedUp(job.id, 10)}
+            className="px-2.5 py-1 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs text-slate-200 inline-flex items-center gap-1.5 border border-white/[0.08]"
+          >
+            <FastForward className="w-3.5 h-3.5 text-[#F59E0B]" />
+            +10 мин тест
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ServicesTab: React.FC = () => {
   const {
     state,
@@ -103,6 +185,7 @@ export const ServicesTab: React.FC = () => {
     cycleTransferStatus,
     adjustStock,
     submitGuestQrRequest,
+    openQrPosterModal,
     pushToast,
   } = useOps();
 
@@ -132,6 +215,12 @@ export const ServicesTab: React.FC = () => {
   // QR Concierge Preview
   const [qrLang, setQrLang] = useState<GuestLang>('ru');
   const [qrBookingId, setQrBookingId] = useState(activeBookings[0]?.id ?? '');
+
+  // Review Booster state
+  const [reviewLang, setReviewLang] = useState<GuestLang>('ru');
+  const [reviewBookingId, setReviewBookingId] = useState(
+    state.bookings.find((b) => b.status === 'checked_out')?.id ?? activeBookings[0]?.id ?? ''
+  );
 
   const qrCopy = QR_COPY[qrLang];
   const pendingHkTasks = state.housekeepingTasks.filter((t) => t.status !== 'approved');
@@ -273,58 +362,9 @@ export const ServicesTab: React.FC = () => {
           </form>
 
           <div className="space-y-2.5">
-            {state.laundryJobs.map((job) => {
-              const pct =
-                job.totalSeconds > 0
-                  ? Math.min(100, Math.round(((job.totalSeconds - job.remainingSeconds) / job.totalSeconds) * 100))
-                  : 100;
-              return (
-                <div
-                  key={job.id}
-                  className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-semibold text-white">
-                        {job.roomLabel} · {job.guestName}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {job.mode === 'fast' ? 'Быстрая 22 мин ($2)' : 'Средняя 55 мин ($3)'}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={`text-lg font-bold font-mono tabular-nums ${
-                          job.status === 'completed' ? 'text-[#10B981]' : 'text-[#3B82F6]'
-                        }`}
-                      >
-                        {job.status === 'completed' ? 'Готово!' : formatTimer(job.remainingSeconds)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-full h-1.5 rounded-full bg-[#1A2234] overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        job.status === 'completed' ? 'bg-[#10B981]' : 'bg-[#3B82F6]'
-                      }`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  {job.status === 'running' && (
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => speedUpLaundry(job.id, 10)}
-                        className="px-2.5 py-1 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs text-slate-200 inline-flex items-center gap-1.5 border border-white/[0.08]"
-                      >
-                        <FastForward className="w-3.5 h-3.5 text-[#F59E0B]" />
-                        +10 мин тест
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {state.laundryJobs.map((job) => (
+              <LaundryJobCard key={job.id} job={job} onSpeedUp={speedUpLaundry} />
+            ))}
           </div>
         </section>
 
@@ -598,26 +638,41 @@ export const ServicesTab: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">
-              От имени какого гостя тестируем QR:
-            </label>
-            <select
-              value={selectedQrBooking?.id ?? ''}
-              onChange={(e) => setQrBookingId(e.target.value)}
-              className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-xs text-slate-400 mb-1">
+                От имени какого гостя тестируем QR:
+              </label>
+              <select
+                value={selectedQrBooking?.id ?? ''}
+                onChange={(e) => setQrBookingId(e.target.value)}
+                className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
+              >
+                {activeBookings.map((b) => {
+                  const rm = state.physicalRooms.find(
+                    (r) => r.id === b.segments[b.segments.length - 1]?.roomId
+                  );
+                  return (
+                    <option key={b.id} value={b.id}>
+                      {rm?.code} · {b.guests[0]?.fullName}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const roomId =
+                  selectedQrBooking?.segments[selectedQrBooking.segments.length - 1]?.roomId ??
+                  state.physicalRooms[0]?.id;
+                openQrPosterModal(roomId);
+              }}
+              className="px-3 py-2 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-semibold text-white border border-white/[0.08] inline-flex items-center gap-1.5 whitespace-nowrap"
             >
-              {activeBookings.map((b) => {
-                const rm = state.physicalRooms.find(
-                  (r) => r.id === b.segments[b.segments.length - 1]?.roomId
-                );
-                return (
-                  <option key={b.id} value={b.id}>
-                    {rm?.code} · {b.guests[0]?.fullName}
-                  </option>
-                );
-              })}
-            </select>
+              <Printer className="w-3.5 h-3.5 text-[#10B981]" />
+              Печать QR-постера
+            </button>
           </div>
 
           {/* Mobile Phone Frame */}
@@ -734,6 +789,75 @@ export const ServicesTab: React.FC = () => {
                 );
               })}
             </div>
+          </div>
+
+          {/* 2-Stage Post-Checkout Review Booster */}
+          <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-[#F59E0B]" />
+                <h2 className="text-sm font-semibold text-white">
+                  2-ступенчатый Review Booster (Google / Booking)
+                </h2>
+              </div>
+              <div className="flex items-center gap-1 p-0.5 bg-[#0B0F17] border border-white/[0.08] rounded-lg">
+                {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setReviewLang(l)}
+                    className={`px-2 py-0.5 rounded-md text-xs font-mono uppercase transition-colors ${
+                      reviewLang === l
+                        ? 'bg-[#F59E0B] text-slate-950 font-semibold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Гость для запроса отзыва"
+                value={reviewBookingId}
+                onChange={(e) => setReviewBookingId(e.target.value)}
+                className="flex-1 min-w-[200px] bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
+              >
+                {state.bookings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.guests[0]?.fullName ?? 'Гость'} ({b.status === 'checked_out' ? 'Выехал' : 'Проживает'})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const target =
+                    state.bookings.find((b) => b.id === reviewBookingId) ?? state.bookings[0];
+                  const name = target?.guests[0]?.fullName ?? 'Гость';
+                  const msg = REVIEW_TEMPLATES[reviewLang](name);
+                  navigator.clipboard?.writeText(msg).catch(() => {});
+                  pushToast(
+                    'Запрос отзыва скопирован',
+                    `Готово для WhatsApp / Telegram (${reviewLang.toUpperCase()})`,
+                    'emerald'
+                  );
+                }}
+                className="px-3.5 py-2 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Копировать для WhatsApp / TG
+              </button>
+            </div>
+
+            <pre className="p-3 rounded-xl bg-[#0B0F17] border border-white/[0.08] text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">
+              {REVIEW_TEMPLATES[reviewLang](
+                (state.bookings.find((b) => b.id === reviewBookingId) ?? state.bookings[0])
+                  ?.guests[0]?.fullName ?? 'Гость'
+              )}
+            </pre>
           </div>
 
           {/* Emergency Contacts */}

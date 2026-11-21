@@ -1,4 +1,5 @@
 import type { MrzResult } from '../types/ops';
+import { getTashkentYear } from './time';
 
 export const SAMPLE_MRZ_ITALY = [
   'P<ITAROSSI<<MARCO<<<<<<<<<<<<<<<<<<<<<<<<<<<',
@@ -10,7 +11,7 @@ export const SAMPLE_MRZ_KOREA = [
   'M839104215KOR9603221M3103225<<<<<<<<<<<<<<02',
 ].join('\n');
 
-function parseMrzDate(yymmdd: string, isExpiry: boolean, refYear = 2026): string {
+function parseMrzDate(yymmdd: string, isExpiry: boolean, refYear = getTashkentYear()): string {
   const yy = parseInt(yymmdd.slice(0, 2), 10);
   const mm = yymmdd.slice(2, 4);
   const dd = yymmdd.slice(4, 6);
@@ -25,7 +26,7 @@ function parseMrzDate(yymmdd: string, isExpiry: boolean, refYear = 2026): string
   return `${fullYear}-${mm}-${dd}`;
 }
 
-function calcAgeFromDob(dob: string, refYear = 2026): number {
+function calcAgeFromDob(dob: string, refYear = getTashkentYear()): number {
   const year = parseInt(dob.slice(0, 4), 10);
   if (Number.isNaN(year)) return 25;
   return Math.max(0, refYear - year);
@@ -43,7 +44,7 @@ function formatNamePart(raw: string): string {
  * Parses a standard 2-line ICAO 9303 TD3 passport MRZ string.
  * Tolerates minor whitespace or slightly short lines by padding with '<'.
  */
-export function parseTd3Mrz(input: string, refYear = 2026): MrzResult {
+export function parseTd3Mrz(input: string, refYear = getTashkentYear()): MrzResult {
   const lines = input
     .trim()
     .split(/\r?\n/)

@@ -4,12 +4,26 @@ import {
   AlertTriangle,
   Briefcase,
   CheckCircle2,
+  Copy,
   DoorOpen,
   ShieldAlert,
+  Star,
   X,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
+import type { GuestLang } from '../../types/ops';
 import { calcBookingTotals, formatUsd } from '../../utils/math';
+
+const REVIEW_STAGE_TEMPLATES: Record<GuestLang, (name: string) => string> = {
+  ru: (name) =>
+    `Здравствуйте, ${name}! Спасибо, что выбрали Topchan Hostel в Ташкенте. Оцените, пожалуйста, ваше проживание от 1 до 5 — если что-то можно улучшить, напишите нам лично. Если всё на 5★, будем рады отзыву на Google Maps: https://g.page/r/topchan-hostel-review`,
+  en: (name) =>
+    `Hi ${name}! Thank you for staying at Topchan Hostel Tashkent. How would you rate your stay from 1 to 5? If anything wasn't perfect, reply directly so we can fix it. If it was 5★, we'd love your review on Google Maps: https://g.page/r/topchan-hostel-review`,
+  uz: (name) =>
+    `Salom, ${name}! Toshkentdagi Topchan Hostelni tanlaganingiz uchun rahmat. Yashashingizni 1 dan 5 gacha baholang — agar 5★ bo‘lsa, Google Maps sahifamizda izoh qoldirsangiz juda xursand bo‘lamiz: https://g.page/r/topchan-hostel-review`,
+  zh: (name) =>
+    `您好 ${name}！感谢入住塔什干 Topchan Hostel。请为本次入住打分（1–5星）：如有任何建议欢迎直接私信我们；如果满意（5★），欢迎在 Google Maps 为我们留下好评：https://g.page/r/topchan-hostel-review`,
+};
 
 export const CheckOutModal: React.FC = () => {
   const {
@@ -18,6 +32,7 @@ export const CheckOutModal: React.FC = () => {
     closeCheckOutModal,
     checkOut,
     setSelectedBookingId,
+    pushToast,
   } = useOps();
 
   const booking = useMemo(
@@ -37,6 +52,7 @@ export const CheckOutModal: React.FC = () => {
   const [bagsCount, setBagsCount] = useState(1);
   const [flightTime, setFlightTime] = useState('23:40');
   const [luggageNotes, setLuggageNotes] = useState('');
+  const [reviewLang, setReviewLang] = useState<GuestLang>('en');
 
   useEffect(() => {
     if (!checkOutBookingId) return;
@@ -289,6 +305,53 @@ export const CheckOutModal: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* 2-Stage Post-Checkout Review Booster */}
+            <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-white">
+                  <Star className="w-4 h-4 text-[#F59E0B]" />
+                  <span>Review Booster (2 этапа: 1–5★ лично → Google Maps)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((l) => (
+                    <button
+                      key={l}
+                      type="button"
+                      onClick={() => setReviewLang(l)}
+                      className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase ${
+                        reviewLang === l
+                          ? 'bg-[#F59E0B] text-slate-950'
+                          : 'bg-[#121826] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {l === 'zh' ? '中文' : l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed bg-[#121826] border border-white/[0.06] rounded-lg p-2.5">
+                {REVIEW_STAGE_TEMPLATES[reviewLang](booking.guests[0]?.fullName ?? 'Guest')}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const text = REVIEW_STAGE_TEMPLATES[reviewLang](
+                    booking.guests[0]?.fullName ?? 'Guest'
+                  );
+                  navigator.clipboard?.writeText(text).catch(() => {});
+                  pushToast(
+                    'Приглашение на отзыв скопировано',
+                    `Язык: ${reviewLang.toUpperCase()} — готово для WhatsApp / Telegram`,
+                    'emerald'
+                  );
+                }}
+                className="px-3 py-1.5 rounded-lg bg-[#1A2234] hover:bg-slate-700 border border-white/[0.08] text-xs font-medium text-slate-200 inline-flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Скопировать для WhatsApp / Telegram
+              </button>
             </div>
 
             {!canComplete && (

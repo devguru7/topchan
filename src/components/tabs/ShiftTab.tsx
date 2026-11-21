@@ -5,14 +5,19 @@ import {
   Circle,
   Clock,
   DoorOpen,
+  Loader2,
   Mic,
+  MicOff,
   ScanLine,
   Sparkles,
   UserPlus,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
+import type { ParsedCommand } from '../../types/ops';
 import { COMMAND_PRESETS, parseRussianReceptionCommand } from '../../utils/commandParser';
 import { calcBookingTotals, formatUsd, formatUzs } from '../../utils/math';
+import { useVoiceDictation } from '../../hooks/useVoiceDictation';
+import { parseReceptionCommandSmart } from '../../services/aiService';
 
 export const ShiftTab: React.FC = () => {
   const {
@@ -26,9 +31,20 @@ export const ShiftTab: React.FC = () => {
   } = useOps();
 
   const [commandText, setCommandText] = useState('');
-  const [isDictating, setIsDictating] = useState(false);
+  const [aiParsedOverride, setAiParsedOverride] = useState<ParsedCommand | null>(null);
+  const [aiEngine, setAiEngine] = useState<'local' | 'gemini'>('local');
+  const [aiLoading, setAiLoading] = useState(false);
 
-  const parsed = useMemo(() => {
+  const voice = useVoiceDictation({
+    onTranscript: (text) => {
+      setCommandText(text);
+      setAiParsedOverride(null);
+      setAiEngine('local');
+    },
+    onStatusMessage: (msg, tone) => pushToast('Голосовой ввод', msg, tone),
+  });
+
+  const localParsed = useMemo(() => {
     if (commandText.trim().length < 4) return null;
     return parseRussianReceptionCommand(
       commandText,
@@ -38,24 +54,43 @@ export const ShiftTab: React.FC = () => {
     );
   }, [commandText, state.physicalRooms, state.roomCategories, state.currency]);
 
+  const parsed = aiParsedOverride ?? localParsed;
+
   const completedChecklistCount = state.shiftChecklist.filter((c) => c.done).length;
   const checkoutsToday = state.bookings.filter(
     (b) => b.status === 'active' && b.checkingOutToday
   );
 
-  const handleVoiceSimulate = () => {
-    setIsDictating(true);
-    pushToast('Диктовка активна', 'Симуляция распознавания речи администратора...', 'cobalt');
-    window.setTimeout(() => {
-      setCommandText(COMMAND_PRESETS[0]);
-      setIsDictating(false);
-    }, 650);
+  const handleAiEnhance = async () => {
+    if (commandText.trim().length < 4) return;
+    setAiLoading(true);
+    try {
+      const res = await parseReceptionCommandSmart(
+        commandText,
+        state.physicalRooms,
+        state.roomCategories,
+        state.currency
+      );
+      setAiParsedOverride(res.parsed);
+      setAiEngine(res.engine);
+      pushToast(
+        res.engine === 'gemini' ? 'Разобрано через Gemini AI' : 'Разобрано локальным парсером',
+        res.parsed.confidenceNote,
+        res.engine === 'gemini' ? 'emerald' : 'cobalt'
+      );
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const handleCommit = () => {
     if (!parsed) return;
-    commitParsedCommand(parsed);
-    setCommandText('');
+    const ok = commitParsedCommand(parsed);
+    if (ok) {
+      setCommandText('');
+      setAiParsedOverride(null);
+      setAiEngine('local');
+    }
   };
 
   return (
@@ -101,7 +136,11 @@ export const ShiftTab: React.FC = () => {
             type="text"
             aria-label="Командная строка автопилота"
             value={commandText}
-            onChange={(e) => setCommandText(e.target.value)}
+            onChange={(e) => {
+              setCommandText(e.target.value);
+              setAiParsedOverride(null);
+              setAiEngine('local');
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && parsed) {
                 e.preventDefault();
@@ -113,17 +152,35 @@ export const ShiftTab: React.FC = () => {
           />
           <button
             type="button"
-            onClick={handleVoiceSimulate}
+            onClick={voice.toggle}
             className={`px-4 py-3 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition-colors border ${
-              isDictating
+              voice.isListening
                 ? 'bg-[#F43F5E]/20 text-[#F43F5E] border-[#F43F5E]/40'
                 : 'bg-[#1A2234] hover:bg-slate-700 text-white border-white/[0.08]'
             }`}
           >
-            <Mic className="w-4 h-4" />
-            {isDictating ? 'Запись...' : 'Диктовка'}
+            {voice.isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            {voice.isListening ? 'Стоп (RU)' : 'Диктовка (RU)'}
+          </button>
+          <button
+            type="button"
+            disabled={aiLoading || commandText.trim().length < 4}
+            onClick={handleAiEnhance}
+            className="px-4 py-3 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition-colors border border-[#3B82F6]/35 bg-[#3B82F6]/15 hover:bg-[#3B82F6]/25 disabled:opacity-50 text-blue-200"
+          >
+            {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            AI-разбор
           </button>
         </div>
+
+        {voice.isListening && (
+          <div className="flex items-center gap-2 text-xs text-[#F43F5E] bg-[#F43F5E]/10 border border-[#F43F5E]/30 rounded-lg px-3 py-2">
+            <span className="w-2 h-2 rounded-full bg-[#F43F5E] animate-ping" />
+            <span>
+              Слушаю микрофон (ru-RU){voice.interimText ? `: «${voice.interimText}»` : '...'}
+            </span>
+          </div>
+        )}
 
         {/* 3 Clickable Realistic Presets */}
         <div className="flex flex-wrap gap-2">
@@ -131,7 +188,11 @@ export const ShiftTab: React.FC = () => {
             <button
               key={preset}
               type="button"
-              onClick={() => setCommandText(preset)}
+              onClick={() => {
+                setCommandText(preset);
+                setAiParsedOverride(null);
+                setAiEngine('local');
+              }}
               className="text-left px-3 py-1.5 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.08] text-xs text-slate-300 hover:text-white transition-colors"
             >
               {preset}
@@ -144,8 +205,11 @@ export const ShiftTab: React.FC = () => {
           <div className="bg-[#0B0F17] border border-[#3B82F6]/40 rounded-xl p-4 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.06]">
               <div>
-                <div className="text-xs font-semibold text-[#3B82F6]">
-                  Карточка подтверждения в 1 клик
+                <div className="text-xs font-semibold text-[#3B82F6] flex items-center gap-2">
+                  <span>Карточка подтверждения в 1 клик</span>
+                  <span className="font-mono text-[11px] text-slate-400">
+                    ({aiEngine === 'gemini' ? 'Gemini AI' : 'Локальный движок'})
+                  </span>
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">{parsed.confidenceNote}</div>
               </div>

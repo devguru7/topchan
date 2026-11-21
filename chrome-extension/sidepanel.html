@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Topchan Ops — Мост Bnovo / E-mehmon</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #0b0f17;
+        color: #f1f5f9;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .card {
+        background: #121826;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .sub {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-top: 2px;
+      }
+      label {
+        display: block;
+        color: #94a3b8;
+        font-size: 12px;
+        margin-bottom: 4px;
+        margin-top: 8px;
+      }
+      input {
+        width: 100%;
+        background: #0b0f17;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        color: #ffffff;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      button {
+        width: 100%;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+      .btn-blue {
+        background: #3b82f6;
+        color: #ffffff;
+      }
+      .btn-emerald {
+        background: #10b981;
+        color: #020617;
+      }
+      .btn-ghost {
+        background: #1a2234;
+        color: #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .status {
+        margin-top: 10px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        background: #0b0f17;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #cbd5e1;
+        font-size: 12px;
+      }
+      .status-ok {
+        border-color: rgba(16, 185, 129, 0.4);
+        color: #10b981;
+      }
+      .status-warn {
+        border-color: rgba(245, 158, 11, 0.4);
+        color: #f59e0b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Topchan Ops Bridge</h1>
+      <div class="sub">Bnovo PMS ↔ E-mehmon.uz (Ташкент)</div>
+      <button id="btnScrapeBnovo" type="button" class="btn-blue">
+        1. Считать бронь из Bnovo
+      </button>
+      <button id="btnFillEmehmon" type="button" class="btn-emerald">
+        2. Заполнить E-mehmon в 1 клик
+      </button>
+      <div id="statusBox" class="status">
+        Откройте вкладку Bnovo для чтения брони или E-mehmon для автозаполнения.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sub">Карточка гостя для переноса</div>
+      <div class="row">
+        <div>
+          <label for="fSurname">Фамилия (Латиница)</label>
+          <input id="fSurname" type="text" placeholder="ROSSI" />
+        </div>
+        <div>
+          <label for="fGivenName">Имя</label>
+          <input id="fGivenName" type="text" placeholder="MARCO" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="fPassport">Номер паспорта</label>
+          <input id="fPassport" type="text" placeholder="YA4829103" />
+        </div>
+        <div>
+          <label for="fDob">Дата рождения</label>
+          <input id="fDob" type="text" placeholder="1991-06-15" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="fCheckIn">Заезд</label>
+          <input id="fCheckIn" type="text" placeholder="YYYY-MM-DD" />
+        </div>
+        <div>
+          <label for="fCheckOut">Выезд</label>
+          <input id="fCheckOut" type="text" placeholder="YYYY-MM-DD" />
+        </div>
+      </div>
+      <button id="btnSaveDraft" type="button" class="btn-ghost">
+        Сохранить карточку в буфер моста
+      </button>
+    </div>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

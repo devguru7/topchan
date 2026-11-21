@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  AlertTriangle,
+  Camera,
   CheckSquare,
   Copy,
   FileText,
+  Loader2,
   ScanLine,
   ShieldCheck,
   UserPlus,
@@ -19,6 +22,9 @@ import {
   formatUzs,
   round2,
 } from '../../utils/math';
+import { addDaysIso, getTashkentTodayIso } from '../../utils/time';
+import { findAlternativeFreeRooms, findRoomConflicts } from '../../utils/availability';
+import { extractPassportMrzFromPhoto } from '../../services/aiService';
 
 export const CheckInModal: React.FC = () => {
   const {
@@ -30,8 +36,9 @@ export const CheckInModal: React.FC = () => {
   } = useOps();
 
   const isOpen = checkInPreselect !== null;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const availableOptions = useMemo(() => {
+  const allRoomOptions = useMemo(() => {
     const items: Array<{
       key: string;
       roomId: string;
@@ -39,6 +46,7 @@ export const CheckInModal: React.FC = () => {
       label: string;
       categoryId: string;
       defaultRate: number;
+      isCurrentlyFree: boolean;
     }> = [];
     for (const room of state.physicalRooms) {
       if (room.archived) continue;
@@ -46,24 +54,24 @@ export const CheckInModal: React.FC = () => {
       const defaultRate = cat?.pricesUsd[1] ?? 18;
       if (room.beds) {
         for (const bed of room.beds) {
-          if (bed.status === 'available') {
-            items.push({
-              key: `${room.id}:${bed.id}`,
-              roomId: room.id,
-              bedId: bed.id,
-              label: `${room.code} · Койка ${bed.label} (${bed.tier}) — $${defaultRate}/н`,
-              categoryId: room.categoryId,
-              defaultRate,
-            });
-          }
+          items.push({
+            key: `${room.id}:${bed.id}`,
+            roomId: room.id,
+            bedId: bed.id,
+            label: `${room.code} · Койка ${bed.label} (${bed.tier}) — $${defaultRate}/н`,
+            categoryId: room.categoryId,
+            defaultRate,
+            isCurrentlyFree: bed.status === 'available',
+          });
         }
-      } else if (room.status === 'available') {
+      } else {
         items.push({
           key: room.id,
           roomId: room.id,
           label: `${room.code} — $${defaultRate}/н`,
           categoryId: room.categoryId,
           defaultRate,
+          isCurrentlyFree: room.status === 'available',
         });
       }
     }
@@ -71,12 +79,15 @@ export const CheckInModal: React.FC = () => {
   }, [state.physicalRooms, state.roomCategories]);
 
   const [selectedKey, setSelectedKey] = useState('');
+  const [fromDate, setFromDate] = useState(() => getTashkentTodayIso());
   const [nights, setNights] = useState(2);
   const [nightlyRate, setNightlyRate] = useState(18);
   const [source, setSource] = useState<'Bnovo' | 'Walk-in' | 'QR Direct' | 'Telegram'>('Bnovo');
 
   // MRZ & Guest data
   const [mrzInput, setMrzInput] = useState('');
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [citizenship, setCitizenship] = useState('ITA');
   const [passportNo, setPassportNo] = useState('');
@@ -102,14 +113,18 @@ export const CheckInModal: React.FC = () => {
       ? `${checkInPreselect.roomId}:${checkInPreselect.bedId}`
       : checkInPreselect?.roomId ?? '';
     const found =
-      availableOptions.find((o) => o.key === preKey) ?? availableOptions[0];
+      allRoomOptions.find((o) => o.key === preKey) ??
+      allRoomOptions.find((o) => o.isCurrentlyFree) ??
+      allRoomOptions[0];
     if (found) {
       setSelectedKey(found.key);
       setNightlyRate(found.defaultRate);
       setPayAmount(round2(found.defaultRate * 2));
     }
+    setFromDate(checkInPreselect?.fromDate || getTashkentTodayIso());
     setNights(2);
     setMrzInput('');
+    setOcrNote(null);
     setFullName('');
     setPassportNo('');
     setCitizenship('ITA');
@@ -120,7 +135,7 @@ export const CheckInModal: React.FC = () => {
     setChkBnovoPaid(false);
     setChkEmehmonDone(false);
     setChkTourDone(false);
-  }, [isOpen, checkInPreselect, availableOptions]);
+  }, [isOpen, checkInPreselect, allRoomOptions]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -149,7 +164,70 @@ export const CheckInModal: React.FC = () => {
     }
   };
 
-  const selectedOption = availableOptions.find((o) => o.key === selectedKey);
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      pushToast('Неверный формат файла', 'Загрузите изображение паспорта (JPG / PNG / WebP)', 'rose');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      pushToast('Файл слишком большой', 'Максимальный размер фото паспорта — 5 МБ', 'rose');
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrNote(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('read_failed'));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+      const result = await extractPassportMrzFromPhoto(base64, file.type);
+      if (result.mrzRaw) {
+        applyMrzString(result.mrzRaw);
+        setOcrNote(result.note);
+      } else {
+        setOcrNote(result.note);
+        pushToast('OCR-подсказка', result.note, 'amber');
+      }
+    } catch {
+      pushToast('Не удалось прочитать файл', 'Попробуйте вставить 2 строки MRZ вручную', 'rose');
+    } finally {
+      setOcrLoading(false);
+    }
+  };
+
+  const selectedOption = allRoomOptions.find((o) => o.key === selectedKey);
+  const toDate = addDaysIso(fromDate, Math.max(1, nights));
+
+  // Real-time Overbooking Conflict Check + Alternative Suggestions
+  const conflicts = useMemo(() => {
+    if (!selectedOption) return [];
+    return findRoomConflicts(
+      state.bookings,
+      selectedOption.roomId,
+      selectedOption.bedId,
+      fromDate,
+      toDate
+    );
+  }, [state.bookings, selectedOption, fromDate, toDate]);
+
+  const alternativeRooms = useMemo(() => {
+    if (conflicts.length === 0 || !selectedOption) return [];
+    return findAlternativeFreeRooms(
+      state.physicalRooms,
+      state.bookings,
+      selectedOption.categoryId,
+      fromDate,
+      toDate
+    ).slice(0, 6);
+  }, [conflicts.length, selectedOption, state.physicalRooms, state.bookings, fromDate, toDate]);
+
   const totalUsd = round2(Math.max(1, nights) * nightlyRate);
   const totalUzs = calcAccommodationUzs(totalUsd, state.currency.accRate);
 
@@ -165,7 +243,13 @@ export const CheckInModal: React.FC = () => {
 
   const allChecked =
     chkOriginalPassport && chkVisaChecked && chkBnovoPaid && chkEmehmonDone && chkTourDone;
-  const canSubmit = Boolean(selectedOption && fullName.trim().length >= 2 && passportNo.trim().length >= 4 && allChecked);
+  const canSubmit = Boolean(
+    selectedOption &&
+      conflicts.length === 0 &&
+      fullName.trim().length >= 2 &&
+      passportNo.trim().length >= 4 &&
+      allChecked
+  );
 
   const handleCopyEmehmonJson = () => {
     const payload = {
@@ -175,6 +259,7 @@ export const CheckInModal: React.FC = () => {
       citizenship,
       dob,
       room: selectedOption?.label ?? '',
+      fromDate,
       nights,
     };
     navigator.clipboard?.writeText(JSON.stringify(payload, null, 2)).catch(() => {});
@@ -202,6 +287,7 @@ export const CheckInModal: React.FC = () => {
     checkIn({
       roomId: selectedOption.roomId,
       bedId: selectedOption.bedId,
+      fromDate,
       nights: Math.max(1, nights),
       nightlyRateUsd: nightlyRate,
       source,
@@ -259,7 +345,7 @@ export const CheckInModal: React.FC = () => {
                 <div>
                   <h2 className="text-base font-semibold text-white">Заселение гостя (Check-in)</h2>
                   <p className="text-xs text-slate-400">
-                    ICAO TD3 MRZ парсер · проверка оригинала · чек-лист Bnovo &amp; E-mehmon
+                    ICAO TD3 MRZ парсер · защита от овербукинга · чек-лист Bnovo &amp; E-mehmon
                   </p>
                 </div>
               </div>
@@ -274,14 +360,35 @@ export const CheckInModal: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="overflow-y-auto p-5 space-y-5">
-              {/* MRZ Scanner Section */}
+              {/* MRZ Scanner + Photo OCR Section */}
               <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-white">
                     <ScanLine className="w-4 h-4 text-[#3B82F6]" />
-                    <span>Сканер MRZ (2 строки паспорта TD3)</span>
+                    <span>Сканер MRZ (2 строки TD3 или фото паспорта)</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={ocrLoading}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-2.5 py-1 rounded-lg bg-[#3B82F6]/20 hover:bg-[#3B82F6]/30 text-xs font-semibold text-blue-200 border border-[#3B82F6]/40 inline-flex items-center gap-1.5"
+                    >
+                      {ocrLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Camera className="w-3.5 h-3.5" />
+                      )}
+                      Скан фото паспорта
+                    </button>
                     <button
                       type="button"
                       onClick={() => applyMrzString(SAMPLE_MRZ_ITALY)}
@@ -317,6 +424,12 @@ export const CheckInModal: React.FC = () => {
                   placeholder="Вставьте 2 строки MRZ из паспорта (например P<ITAROSSI<<MARCO...)"
                   className="w-full bg-[#121826] border border-white/[0.08] rounded-lg px-3 py-2 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#3B82F6]"
                 />
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-400">
+                    Фото обрабатывается только в памяти и никогда не сохраняется.
+                  </span>
+                  {ocrNote && <span className="text-blue-300">{ocrNote}</span>}
+                </div>
                 {mrzParsed && (
                   <div
                     className={`text-xs ${
@@ -330,9 +443,9 @@ export const CheckInModal: React.FC = () => {
                 )}
               </div>
 
-              {/* Room & Guest Details */}
+              {/* Room & Date Selection + Live Overbooking Alert */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5">
                     Комната / Койка
                   </label>
@@ -341,7 +454,7 @@ export const CheckInModal: React.FC = () => {
                     onChange={(e) => {
                       const val = e.target.value;
                       setSelectedKey(val);
-                      const opt = availableOptions.find((o) => o.key === val);
+                      const opt = allRoomOptions.find((o) => o.key === val);
                       if (opt) {
                         setNightlyRate(opt.defaultRate);
                         setPayAmount(round2(opt.defaultRate * nights));
@@ -349,16 +462,71 @@ export const CheckInModal: React.FC = () => {
                     }}
                     className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#3B82F6]"
                   >
-                    {availableOptions.length === 0 && (
-                      <option value="">Нет свободных комнат</option>
-                    )}
-                    {availableOptions.map((opt) => (
+                    {allRoomOptions.map((opt) => (
                       <option key={opt.key} value={opt.key}>
                         {opt.label}
                       </option>
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                    Дата заезда → выезда ({toDate})
+                  </label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value || getTashkentTodayIso())}
+                    className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
+                  />
+                </div>
+
+                {conflicts.length > 0 && (
+                  <div className="sm:col-span-2 bg-[#F43F5E]/10 border border-[#F43F5E]/40 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-start gap-2 text-xs text-rose-200">
+                      <AlertTriangle className="w-4 h-4 text-[#F43F5E] shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-[#F43F5E]">
+                          Овербукинг заблокирован на даты {fromDate} → {toDate}
+                        </p>
+                        <p className="mt-0.5">
+                          Пересечение с бронью {conflicts[0].bnovoId} ({conflicts[0].guestName}:{' '}
+                          {conflicts[0].fromDate} — {conflicts[0].toDate}).
+                        </p>
+                      </div>
+                    </div>
+                    {alternativeRooms.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-slate-300">
+                          Альтернативные свободные комнаты на эти даты (1 клик):
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {alternativeRooms.map((alt) => {
+                            const key = alt.bedId ? `${alt.roomId}:${alt.bedId}` : alt.roomId;
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedKey(key);
+                                  const opt = allRoomOptions.find((o) => o.key === key);
+                                  if (opt) {
+                                    setNightlyRate(opt.defaultRate);
+                                    setPayAmount(round2(opt.defaultRate * nights));
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-xs font-semibold text-emerald-200"
+                              >
+                                {alt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5">

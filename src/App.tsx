@@ -10,12 +10,14 @@ import {
   Search,
   WashingMachine,
 } from 'lucide-react';
-import { OpsProvider, useOps } from './context/OpsContext';
+import { OpsProvider, useOps, useTimers } from './context/OpsContext';
 import type { TabId } from './types/ops';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastStack } from './components/ToastStack';
 import { CommandPalette } from './components/CommandPalette';
 import { ChromeSidePanel } from './components/ChromeSidePanel';
+import { QrPosterModal } from './components/QrPosterModal';
+import { GuestStandaloneView } from './components/GuestStandaloneView';
 import { GuestFolioDrawer } from './components/modals/GuestFolioDrawer';
 import { CheckInModal } from './components/modals/CheckInModal';
 import { CheckOutModal } from './components/modals/CheckOutModal';
@@ -24,6 +26,30 @@ import { ShiftTab } from './components/tabs/ShiftTab';
 import { CashTab } from './components/tabs/CashTab';
 import { ServicesTab } from './components/tabs/ServicesTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
+
+/**
+ * Isolated ticking Tashkent (UTC+5) clock subscribed solely to TimerContext
+ * so 1-second clock ticks never re-render OpsWorkspace or any main tab.
+ */
+const TashkentClock: React.FC<{ compact?: boolean }> = ({ compact }) => {
+  const { clockStr, todayRu } = useTimers();
+  if (compact) {
+    return (
+      <span className="font-mono tabular-nums text-xs text-[#10B981]">
+        UZT {clockStr}
+      </span>
+    );
+  }
+  return (
+    <div className="mt-2.5 pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-xs">
+      <span className="text-slate-400">Ташкент (UZT)</span>
+      <span className="font-mono tabular-nums font-semibold text-[#10B981]">
+        {clockStr}
+      </span>
+      <span className="sr-only">{todayRu}</span>
+    </div>
+  );
+};
 
 const NAV_ITEMS: Array<{
   id: TabId;
@@ -58,11 +84,12 @@ const OpsWorkspace: React.FC = () => {
         aria-label="Основная навигация"
         className="hidden lg:flex lg:flex-col lg:w-64 lg:shrink-0 bg-[#121826] border-r border-white/[0.08] h-screen sticky top-0"
       >
-        <div className="px-5 py-5 border-b border-white/[0.08]">
+        <div className="px-5 py-4 border-b border-white/[0.08]">
           <div className="text-lg font-bold tracking-tight text-white">Topchan Ops</div>
           <div className="text-xs text-slate-400 mt-0.5">
             {state.integrations.propertyName}
           </div>
+          <TashkentClock />
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
@@ -155,7 +182,10 @@ const OpsWorkspace: React.FC = () => {
       {/* Mobile Sticky Top Status Bar (< 1024px) */}
       <header className="lg:hidden sticky top-0 z-30 bg-[#121826]/95 backdrop-blur-md border-b border-white/[0.08] px-4 py-2.5 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-bold text-white truncate">Topchan Ops</div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-white truncate">Topchan Ops</span>
+            <TashkentClock compact />
+          </div>
           <div className="text-xs font-mono tabular-nums text-slate-400 truncate">
             USD {state.currency.accRate.toLocaleString('ru-RU')} / Ex{' '}
             {state.currency.exRate.toLocaleString('ru-RU')}
@@ -260,6 +290,7 @@ const OpsWorkspace: React.FC = () => {
       <GuestFolioDrawer />
       <CheckInModal />
       <CheckOutModal />
+      <QrPosterModal />
       <CommandPalette />
       <ToastStack />
     </div>
@@ -267,11 +298,18 @@ const OpsWorkspace: React.FC = () => {
 };
 
 export default function App() {
+  const params =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  const isGuestMode = params.get('mode') === 'guest';
+  const roomParam = params.get('room');
+
   return (
     <ErrorBoundary>
       <MotionConfig reducedMotion="user">
         <OpsProvider>
-          <OpsWorkspace />
+          {isGuestMode ? <GuestStandaloneView roomParam={roomParam} /> : <OpsWorkspace />}
         </OpsProvider>
       </MotionConfig>
     </ErrorBoundary>

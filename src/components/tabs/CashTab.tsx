@@ -1,10 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
+  BarChart3,
   Calculator,
   CheckCircle2,
   ClipboardCopy,
+  ExternalLink,
+  Printer,
   ShieldCheck,
   Vault,
   Wallet,
@@ -12,6 +16,7 @@ import {
 import { useOps } from '../../context/OpsContext';
 import type { CashPocketId, CurrencyCode } from '../../types/ops';
 import {
+  calcBookingTotals,
   calcDenominationTotals,
   calcDualRateChange,
   calcMonthlyTouristTaxUzs,
@@ -21,6 +26,13 @@ import {
   USD_DENOMINATIONS,
   UZS_DENOMINATIONS,
 } from '../../utils/math';
+import {
+  addDaysIso,
+  formatShortDateColumn,
+  formatTashkentDateRu,
+  getDaysToTouristTaxDeadline,
+  getTashkentTodayIso,
+} from '../../utils/time';
 
 export const CashTab: React.FC = () => {
   const {
@@ -29,6 +41,8 @@ export const CashTab: React.FC = () => {
     recordCashCalculatorTransaction,
     createSafeCollection,
     confirmSafeCollection,
+    setSelectedBookingId,
+    setActiveTab,
     pushToast,
   } = useOps();
 
@@ -98,6 +112,74 @@ export const CashTab: React.FC = () => {
     () => calcMonthlyTouristTaxUzs(state.bookings, state.currency.bcvUzs, activePhysicalCount),
     [state.bookings, state.currency.bcvUzs, activePhysicalCount]
   );
+  const daysToTaxDeadline = useMemo(() => getDaysToTouristTaxDeadline(), []);
+
+  // Last 5 cash & change transactions for Discrepancy Debugger
+  const recentCashDiscrepancyTx = useMemo(() => {
+    return state.transactions
+      .filter((t) => t.pocketId === 'cash_uzs' || t.pocketId === 'cash_usd')
+      .slice(0, 5);
+  }, [state.transactions]);
+
+  // 7-Day Occupancy & Payment Method Analytics (pure computed data for inline SVG)
+  const analytics = useMemo(() => {
+    const today = getTashkentTodayIso();
+    const totalUnits = state.physicalRooms
+      .filter((r) => !r.archived)
+      .reduce((acc, r) => acc + (r.beds ? r.beds.length : 1), 0);
+
+    const days7 = Array.from({ length: 7 }, (_, i) => {
+      const iso = addDaysIso(today, i - 3);
+      let occupied = 0;
+      for (const b of state.bookings) {
+        if (b.status === 'cancelled') continue;
+        const activeOnDay = b.segments.some((s) => s.fromDate <= iso && s.toDate > iso);
+        if (activeOnDay) occupied += 1;
+      }
+      const pct = totalUnits > 0 ? Math.min(100, Math.round((occupied / totalUnits) * 100)) : 0;
+      const col = formatShortDateColumn(iso);
+      return { iso, label: col.dayMonth.slice(0, 2), weekday: col.weekday, pct, isToday: iso === today };
+    });
+
+    const methodMap: Record<string, { label: string; usd: number; color: string }> = {
+      cash_usd: { label: 'Нал USD', usd: 0, color: '#10B981' },
+      cash_uzs: { label: 'Нал UZS', usd: 0, color: '#F59E0B' },
+      terminal: { label: 'Терминал', usd: 0, color: '#3B82F6' },
+      transfer: { label: 'Click/Payme', usd: 0, color: '#8B5CF6' },
+      cash_eur: { label: 'Нал EUR', usd: 0, color: '#06B6D4' },
+    };
+
+    for (const p of state.pockets) {
+      if (!methodMap[p.id]) continue;
+      const usdVal =
+        p.currency === 'USD'
+          ? p.balance
+          : p.currency === 'UZS'
+            ? p.balance / Math.max(1, state.currency.accRate)
+            : p.balance * (state.currency.cbuEur / Math.max(1, state.currency.cbuUsd));
+      methodMap[p.id].usd = Math.max(0, Math.round(usdVal));
+    }
+
+    const methods = Object.values(methodMap);
+    const totalMethodsUsd = Math.max(
+      1,
+      methods.reduce((s, m) => s + m.usd, 0)
+    );
+
+    const openDebts = state.bookings
+      .filter((b) => b.status === 'active')
+      .map((b) => ({
+        booking: b,
+        debtUsd: calcBookingTotals(b).debtUsd,
+      }))
+      .filter((item) => item.debtUsd > 0);
+
+    const pettyExpenses = state.transactions.filter(
+      (t) => t.direction === 'out' && t.label.startsWith('Хозрасход')
+    );
+
+    return { days7, methods, totalMethodsUsd, openDebts, pettyExpenses };
+  }, [state.physicalRooms, state.bookings, state.pockets, state.currency, state.transactions]);
 
   const filteredTx = useMemo(() => {
     if (activePocketFilter === 'all') return state.transactions.slice(0, 14);
@@ -168,10 +250,18 @@ export const CashTab: React.FC = () => {
     pushToast('Отчёт смены скопирован для Telegram', 'Включены все 6 карманов, сверка и турсбор РУз', 'emerald');
   };
 
+  const handlePrintZReport = () => {
+    document.body.dataset.printTarget = 'z-report';
+    window.print();
+    window.setTimeout(() => {
+      delete document.body.dataset.printTarget;
+    }, 300);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 print:hidden">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
             Касса — 6 мультивалютных карманов
@@ -182,14 +272,24 @@ export const CashTab: React.FC = () => {
             {formatUzs(monthlyTouristTaxUzs)}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleCopyShiftReport}
-          className="px-4 py-2.5 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors"
-        >
-          <ClipboardCopy className="w-4 h-4" />
-          Скопировать отчёт смены для Telegram
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrintZReport}
+            className="px-3.5 py-2.5 rounded-lg bg-[#121826] hover:bg-[#1A2234] border border-white/[0.1] text-slate-100 text-xs font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <Printer className="w-4 h-4 text-[#10B981]" />
+            Печать / PDF акта смены
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyShiftReport}
+            className="px-4 py-2.5 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <ClipboardCopy className="w-4 h-4" />
+            Скопировать отчёт смены для Telegram
+          </button>
+        </div>
       </div>
 
       {/* 6 Live Cash Pockets */}
@@ -592,6 +692,295 @@ export const CashTab: React.FC = () => {
               <span className="text-sm font-bold text-white">{formatUsd(denomTotals.totalUsd)}</span>
             </div>
           </div>
+        </div>
+
+        {/* Cash Discrepancy Debugger */}
+        {(diffUzs !== 0 || diffUsd !== 0) && (
+          <div className="rounded-xl border border-[#F43F5E]/40 bg-[#F43F5E]/10 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#F43F5E]">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>
+                  Диагностика расхождения кассы · Последние 5 операций с наличными и сдачей
+                </span>
+              </div>
+              <span className="text-xs font-mono tabular-nums text-rose-200">
+                {diffUzs !== 0 ? `UZS: ${diffUzs > 0 ? '+' : ''}${formatUzs(diffUzs)}` : ''}{' '}
+                {diffUsd !== 0 ? `USD: ${diffUsd > 0 ? '+' : ''}${formatUsd(diffUsd)}` : ''}
+              </span>
+            </div>
+            <div className="divide-y divide-rose-500/20 rounded-lg border border-rose-500/25 bg-[#0B0F17]/90 overflow-hidden">
+              {recentCashDiscrepancyTx.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="text-slate-100 font-medium truncate">{tx.label}</div>
+                    <div className="text-slate-400">
+                      {tx.pocketId === 'cash_usd' ? 'Нал USD' : 'Нал UZS'} · {tx.actor}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span
+                      className={`font-mono tabular-nums font-semibold ${
+                        tx.direction === 'in' ? 'text-[#10B981]' : 'text-[#F43F5E]'
+                      }`}
+                    >
+                      {tx.direction === 'in' ? '+' : '−'}
+                      {formatPocketBalance(tx.currency, tx.amount)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (tx.bookingId) {
+                          setActiveTab('grid');
+                          setSelectedBookingId(tx.bookingId);
+                        } else {
+                          setActivePocketFilter(tx.pocketId);
+                          pushToast('Фильтр применён', `Показаны операции кармана ${tx.pocketId}`, 'cobalt');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-md bg-[#1A2234] hover:bg-slate-700 text-slate-200 inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Проверить
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Pure-SVG Shift & Revenue Analytics */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 print:hidden">
+        {/* 7-Day Occupancy SVG Bar Chart */}
+        <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold text-white">
+              <BarChart3 className="w-4 h-4 text-[#10B981]" />
+              <span>Загрузка за 7 дней (%)</span>
+            </div>
+            <span className="text-xs font-mono tabular-nums text-[#10B981]">
+              Сегодня: {analytics.days7.find((d) => d.isToday)?.pct ?? 0}%
+            </span>
+          </div>
+          <svg
+            viewBox="0 0 280 110"
+            className="w-full h-28"
+            role="img"
+            aria-label="График загрузки хостела за 7 дней"
+          >
+            {analytics.days7.map((d, idx) => {
+              const x = 10 + idx * 38;
+              const barH = Math.max(8, Math.round((d.pct / 100) * 66));
+              const y = 80 - barH;
+              return (
+                <g key={d.iso}>
+                  <rect x={x} y={14} width={24} height={66} rx={5} fill="#0B0F17" />
+                  <rect
+                    x={x}
+                    y={y}
+                    width={24}
+                    height={barH}
+                    rx={5}
+                    fill={d.isToday ? '#10B981' : '#3B82F6'}
+                    opacity={d.isToday ? 1 : 0.7}
+                  />
+                  <text
+                    x={x + 12}
+                    y={y - 3}
+                    textAnchor="middle"
+                    fill="#CBD5E1"
+                    fontSize="9"
+                    fontFamily="monospace"
+                  >
+                    {d.pct}%
+                  </text>
+                  <text
+                    x={x + 12}
+                    y={96}
+                    textAnchor="middle"
+                    fill={d.isToday ? '#10B981' : '#94A3B8'}
+                    fontSize="9"
+                  >
+                    {d.weekday}
+                  </text>
+                  <text
+                    x={x + 12}
+                    y={107}
+                    textAnchor="middle"
+                    fill="#64748B"
+                    fontSize="8"
+                    fontFamily="monospace"
+                  >
+                    {d.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Payment Method Split SVG Stacked Chart */}
+        <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-white">Структура кассы по методам</span>
+            <span className="font-mono tabular-nums text-slate-300">
+              ≈ {formatUsd(analytics.totalMethodsUsd)}
+            </span>
+          </div>
+          <svg
+            viewBox="0 0 280 24"
+            className="w-full h-6 rounded-lg overflow-hidden"
+            role="img"
+            aria-label="Разбивка кассы по способам оплаты"
+          >
+            {(() => {
+              let cursor = 0;
+              return analytics.methods.map((m) => {
+                const w = (m.usd / analytics.totalMethodsUsd) * 280;
+                const el = (
+                  <rect
+                    key={m.label}
+                    x={cursor}
+                    y={0}
+                    width={Math.max(0, w)}
+                    height={24}
+                    fill={m.color}
+                  />
+                );
+                cursor += w;
+                return el;
+              });
+            })()}
+          </svg>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+            {analytics.methods.map((m) => (
+              <div key={m.label} className="flex items-center justify-between gap-1">
+                <span className="inline-flex items-center gap-1.5 text-slate-300 truncate">
+                  <span
+                    className="w-2.5 h-2.5 rounded-xs shrink-0"
+                    style={{ backgroundColor: m.color }}
+                  />
+                  {m.label}
+                </span>
+                <span className="font-mono tabular-nums text-slate-200">${m.usd}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Uzbekistan Monthly Tourist Tax Progress */}
+        <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-4 flex flex-col justify-between space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-white">Турсбор РУз (до {daysToTaxDeadline.deadlineLabel})</span>
+            <span className="font-mono tabular-nums text-[#F59E0B]">
+              Осталось {daysToTaxDeadline.daysLeft} дн.
+            </span>
+          </div>
+          <div>
+            <div className="text-xl font-bold font-mono tabular-nums text-white">
+              {formatUzs(monthlyTouristTaxUzs)}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5 font-mono tabular-nums">
+              БРВ {state.currency.bcvUzs.toLocaleString('ru-RU')} · {activePhysicalCount} комн.
+              ({activePhysicalCount <= 10 ? '5%' : activePhysicalCount <= 40 ? '10%' : '15%'})
+            </div>
+          </div>
+          <div className="space-y-1">
+            <svg viewBox="0 0 280 12" className="w-full h-3 rounded-full overflow-hidden">
+              <rect x={0} y={0} width={280} height={12} fill="#0B0F17" />
+              <rect
+                x={0}
+                y={0}
+                width={Math.max(16, Math.min(280, Math.round((daysToTaxDeadline.monthProgressPct / 100) * 280)))}
+                height={12}
+                rx={6}
+                fill={daysToTaxDeadline.daysLeft <= 5 ? '#F43F5E' : '#10B981'}
+              />
+            </svg>
+            <div className="flex justify-between text-xs text-slate-400">
+              <span>Накоплено за период</span>
+              <span>Срок оплаты: {daysToTaxDeadline.deadlineLabel}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Printable Z-Report Sheet (Visible only in @media print when z-report requested) */}
+      <section
+        id="printable-z-report"
+        className="hidden print:block bg-white text-slate-950 p-6 space-y-4 border border-slate-300"
+      >
+        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-3">
+          <div>
+            <h2 className="text-xl font-bold">{state.integrations.propertyName} — Акт смены (Z-Report)</h2>
+            <p className="text-xs text-slate-600">
+              Дата: {formatTashkentDateRu()} · Администратор: {state.adminName}
+            </p>
+          </div>
+          <div className="text-right font-mono text-xs tabular-nums">
+            <div>ЦБ USD: {state.currency.cbuUsd}</div>
+            <div>Acc: {state.currency.accRate} · Ex: {state.currency.exRate}</div>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-bold mb-1.5">1. Балансы 6 карманов кассы</h3>
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-400 text-left">
+                <th className="py-1">Карман</th>
+                <th className="py-1 text-right">Баланс</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.pockets.map((p) => (
+                <tr key={p.id} className="border-b border-slate-200">
+                  <td className="py-1">{p.name}</td>
+                  <td className="py-1 text-right font-mono tabular-nums font-semibold">
+                    {formatPocketBalance(p.currency, p.balance)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 text-xs">
+          <div className="border border-slate-300 p-2.5">
+            <h3 className="font-bold mb-1">2. Сверка купюр (Факт vs План)</h3>
+            <div className="font-mono tabular-nums">
+              UZS факт: {formatUzs(denomTotals.totalUzs)} (план: {formatUzs(expectedCashUzs)}, diff: {diffUzs})
+            </div>
+            <div className="font-mono tabular-nums">
+              USD факт: {formatUsd(denomTotals.totalUsd)} (план: {formatUsd(expectedCashUsd)}, diff: {diffUsd})
+            </div>
+          </div>
+          <div className="border border-slate-300 p-2.5">
+            <h3 className="font-bold mb-1">3. Турсбор РУз и открытые долги</h3>
+            <div className="font-mono tabular-nums">
+              Турсбор (БРВ {state.currency.bcvUzs}): {formatUzs(monthlyTouristTaxUzs)}
+            </div>
+            <div className="font-mono tabular-nums">
+              Открытых долгов: {analytics.openDebts.length} ·{' '}
+              {formatUsd(analytics.openDebts.reduce((s, d) => s + d.debtUsd, 0))}
+            </div>
+          </div>
+        </div>
+
+        <div className="text-xs">
+          <h3 className="font-bold mb-1">4. Хозрасходы и инкассации смены</h3>
+          <div>Хозрасходов: {analytics.pettyExpenses.length}</div>
+          <div>Инкассаций в сейф: {state.safeCollections.length}</div>
+        </div>
+
+        <div className="pt-6 flex justify-between text-xs border-t border-slate-300">
+          <span>Смену сдал: ________________ ({state.adminName})</span>
+          <span>Смену принял: ________________</span>
         </div>
       </section>
 

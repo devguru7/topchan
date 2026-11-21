@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  AlertTriangle,
   ArrowRightLeft,
   Banknote,
   Coffee,
@@ -22,6 +23,8 @@ import {
   formatUzs,
   round2,
 } from '../../utils/math';
+import { addDaysIso, getTashkentTodayIso } from '../../utils/time';
+import { findAlternativeFreeRooms, findRoomConflicts } from '../../utils/availability';
 
 export const GuestFolioDrawer: React.FC = () => {
   const {
@@ -138,28 +141,54 @@ export const GuestFolioDrawer: React.FC = () => {
     setShowPaymentForm(false);
   };
 
+  const targetMove = availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
+  const extFromDate = extendMode === 'move' ? getTashkentTodayIso() : (lastSeg?.toDate ?? getTashkentTodayIso());
+  const extToDate = addDaysIso(extFromDate, Math.max(1, extraNights));
+  const extTargetRoomId = extendMode === 'move' && targetMove ? targetMove.roomId : (lastSeg?.roomId ?? '');
+  const extTargetBedId = extendMode === 'move' ? targetMove?.bedId : lastSeg?.bedId;
+  const extendConflicts = findRoomConflicts(
+    state.bookings,
+    extTargetRoomId,
+    extTargetBedId,
+    extFromDate,
+    extToDate,
+    booking.id
+  );
+  const extendAlternatives =
+    extendConflicts.length > 0 && currentRoom
+      ? findAlternativeFreeRooms(
+          state.physicalRooms,
+          state.bookings,
+          currentRoom.categoryId,
+          extFromDate,
+          extToDate,
+          booking.id
+        ).slice(0, 4)
+      : [];
+
   const handleExtendSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (extendConflicts.length > 0) return;
+    let ok = false;
     if (extendMode === 'move') {
-      const target = availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
-      if (!target) return;
-      extendOrMoveStay({
+      if (!targetMove) return;
+      ok = extendOrMoveStay({
         bookingId: booking.id,
         mode: 'move',
         extraNights,
-        newRoomId: target.roomId,
-        newBedId: target.bedId,
-        nightlyRateUsd: target.rate,
+        newRoomId: targetMove.roomId,
+        newBedId: targetMove.bedId,
+        nightlyRateUsd: targetMove.rate,
       });
     } else {
-      extendOrMoveStay({
+      ok = extendOrMoveStay({
         bookingId: booking.id,
         mode: 'extend',
         extraNights,
         nightlyRateUsd: lastSeg?.nightlyRateUsd ?? 18,
       });
     }
-    setShowExtendForm(false);
+    if (ok) setShowExtendForm(false);
   };
 
   return (
@@ -397,9 +426,41 @@ export const GuestFolioDrawer: React.FC = () => {
                       </div>
                     )}
                   </div>
+                  {extendConflicts.length > 0 && (
+                    <div className="rounded-lg border border-[#F43F5E]/40 bg-[#F43F5E]/10 p-2.5 text-xs text-rose-200 space-y-2">
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#F43F5E] shrink-0 mt-0.5" />
+                        <span>
+                          Конфликт дат ({extFromDate} → {extToDate}) с {extendConflicts[0].guestName}.
+                          Переселите в свободную комнату:
+                        </span>
+                      </div>
+                      {extendAlternatives.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {extendAlternatives.map((alt) => {
+                            const key = alt.bedId ? `${alt.roomId}:${alt.bedId}` : alt.roomId;
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => {
+                                  setExtendMode('move');
+                                  setMoveRoomKey(key);
+                                }}
+                                className="px-2 py-1 rounded-md bg-[#10B981]/20 text-emerald-200 border border-[#10B981]/40 font-semibold"
+                              >
+                                {alt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     type="submit"
-                    className="w-full py-2 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-xs font-semibold text-white"
+                    disabled={extendConflicts.length > 0}
+                    className="w-full py-2 rounded-lg bg-[#3B82F6] hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-xs font-semibold text-white"
                   >
                     {extendMode === 'move' ? 'Подтвердить переселение' : 'Продлить проживание'}
                   </button>

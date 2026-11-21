@@ -49,3 +49,60 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.24);
 }
+
+/* Printable Shift Z-Report & Room QR Poster stylesheets */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    color-scheme: light !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  aside,
+  header,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  body[data-print-target="z-report"] * {
+    visibility: hidden;
+  }
+  body[data-print-target="z-report"] #printable-z-report,
+  body[data-print-target="z-report"] #printable-z-report * {
+    visibility: visible !important;
+  }
+  body[data-print-target="z-report"] #printable-z-report {
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    padding: 24px !important;
+    z-index: 9999 !important;
+  }
+
+  body[data-print-target="qr-poster"] * {
+    visibility: hidden;
+  }
+  body[data-print-target="qr-poster"] #printable-qr-poster,
+  body[data-print-target="qr-poster"] #printable-qr-poster * {
+    visibility: visible !important;
+  }
+  body[data-print-target="qr-poster"] #printable-qr-poster {
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    padding: 32px !important;
+    z-index: 9999 !important;
+  }
+}
+
