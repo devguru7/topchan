@@ -1,22 +1,109 @@
 @import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, :root:not([data-theme="light"]), :root:not([data-theme="light"]) *));
 
 @theme {
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+  --color-hover: var(--bg-hover);
+  --color-subtle: var(--border-subtle);
+  --color-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-ink-secondary: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+}
+
+/* ============================================================================
+ * Obsidian Dark (Default) — Calm, ultra-readable at 03:00 AM
+ * ============================================================================ */
+:root {
+  --bg-canvas: #090C12;
+  --bg-surface: #111622;
+  --bg-elevated: #171E2E;
+  --bg-hover: #1E273B;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+
+  /* Semantic tokens (WCAG AA+ on dark surfaces) */
+  --tone-emerald-fg: #34D399;
+  --tone-emerald-bg: rgba(16, 185, 129, 0.12);
+  --tone-emerald-border: rgba(16, 185, 129, 0.30);
+
+  --tone-amber-fg: #FBBF24;
+  --tone-amber-bg: rgba(245, 158, 11, 0.12);
+  --tone-amber-border: rgba(245, 158, 11, 0.32);
+
+  --tone-rose-fg: #FB7185;
+  --tone-rose-bg: rgba(244, 63, 94, 0.12);
+  --tone-rose-border: rgba(244, 63, 94, 0.32);
+
+  --tone-cobalt-fg: #60A5FA;
+  --tone-cobalt-bg: rgba(59, 130, 246, 0.14);
+  --tone-cobalt-border: rgba(59, 130, 246, 0.32);
+
+  --backdrop-scrim: rgba(4, 7, 13, 0.72);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.24);
+  color-scheme: dark;
+}
+
+/* ============================================================================
+ * Crisp Daylight — High-contrast calm daylight desk theme
+ * ============================================================================ */
+[data-theme="light"] {
+  --bg-canvas: #F4F6F9;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #F8FAFC;
+  --bg-hover: #EEF2F6;
+  --border-subtle: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+
+  /* Semantic tokens (WCAG AA+ on light surfaces) */
+  --tone-emerald-fg: #047857;
+  --tone-emerald-bg: #ECFDF5;
+  --tone-emerald-border: #A7F3D0;
+
+  --tone-amber-fg: #B45309;
+  --tone-amber-bg: #FFFBEB;
+  --tone-amber-border: #FDE68A;
+
+  --tone-rose-fg: #BE123C;
+  --tone-rose-bg: #FFF1F2;
+  --tone-rose-border: #FECDD3;
+
+  --tone-cobalt-fg: #1D4ED8;
+  --tone-cobalt-bg: #EFF6FF;
+  --tone-cobalt-border: #BFDBFE;
+
+  --backdrop-scrim: rgba(15, 23, 42, 0.42);
+  --scrollbar-thumb: rgba(15, 23, 42, 0.16);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.28);
+  color-scheme: light;
 }
 
 @layer base {
   html {
-    background-color: #0B0F17;
-    color: #F1F5F9;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
     font-family: var(--font-sans);
-    color-scheme: dark;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
     margin: 0;
-    background-color: #0B0F17;
-    color: #F1F5F9;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
     overflow-x: hidden;
   }
 
@@ -28,32 +115,71 @@
   button:disabled {
     cursor: not-allowed;
   }
+
+  *:focus-visible {
+    outline: 2px solid #3B82F6;
+    outline-offset: 2px;
+  }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom slim dark scrollbars */
+/* Reusable semantic surface helpers (zero !important hacks) */
+.ops-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+}
+
+.ops-panel {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+}
+
+.ops-input {
+  background-color: var(--bg-canvas);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: 0.75rem;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.ops-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ops-input:focus {
+  outline: none;
+  border-color: #3B82F6;
+}
+
+/* Custom slim theme-aware scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0B0F17;
+  background: var(--bg-canvas);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* Printable Shift Z-Report & Room QR Poster stylesheets */
+/* ============================================================================
+ * Printable Shift Z-Report & Room QR Poster (Always crisp black-on-white)
+ * ============================================================================ */
 @media print {
   html,
-  body {
+  body,
+  [data-theme="dark"],
+  [data-theme="light"] {
     background: #ffffff !important;
     color: #0f172a !important;
     color-scheme: light !important;
@@ -105,4 +231,3 @@
     z-index: 9999 !important;
   }
 }
-

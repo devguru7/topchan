@@ -184,7 +184,7 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       desc: t.extendDesc,
       price: `$${extendPrice}`,
       icon: BedDouble,
-      accent: 'text-emerald-400',
+      accent: 'text-[var(--tone-emerald-fg)]',
     },
     {
       key: 'laundry_fast' as const,
@@ -192,7 +192,7 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       desc: t.laundryFastDesc,
       price: '$2',
       icon: Shirt,
-      accent: 'text-blue-400',
+      accent: 'text-[var(--tone-cobalt-fg)]',
     },
     {
       key: 'laundry_medium' as const,
@@ -200,7 +200,7 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       desc: t.laundryMedDesc,
       price: '$3',
       icon: Shirt,
-      accent: 'text-blue-400',
+      accent: 'text-[var(--tone-cobalt-fg)]',
     },
     {
       key: 'transfer' as const,
@@ -208,7 +208,7 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       desc: t.transferDesc,
       price: '$5',
       icon: Plane,
-      accent: 'text-amber-400',
+      accent: 'text-[var(--tone-amber-fg)]',
     },
     {
       key: 'late_breakfast' as const,
@@ -216,26 +216,26 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
       desc: t.lateBreakfastDesc,
       price: '$2',
       icon: Coffee,
-      accent: 'text-amber-400',
+      accent: 'text-[var(--tone-amber-fg)]',
     },
   ];
 
   return (
-    <div className="min-h-screen bg-[#0B0F17] text-slate-100">
+    <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-md px-4 pb-10 pt-5">
         {/* Top bar: Brand + Language Switcher */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
-              <Sparkles className="h-4 w-4" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--tone-emerald-bg)] text-[var(--tone-emerald-fg)]">
+              <Sparkles className="h-4 w-4" strokeWidth={1.75} />
             </div>
             <div>
-              <p className="text-sm font-bold text-slate-50">{state.integrations.propertyName}</p>
-              <p className="text-xs text-slate-400">{roomLabel}</p>
+              <p className="text-sm font-bold text-[var(--text-primary)]">{state.integrations.propertyName}</p>
+              <p className="text-xs text-[var(--text-muted)]">{roomLabel}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-[#121826] p-1 shrink-0">
+          <div className="flex items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-1 shrink-0">
             {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((code) => (
               <button
                 key={code}
@@ -243,8 +243,8 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
                 onClick={() => setLang(code)}
                 className={`rounded-lg px-2 py-1 text-xs font-bold uppercase whitespace-nowrap transition ${
                   lang === code
-                    ? 'bg-emerald-500 text-slate-950'
-                    : 'text-slate-400 hover:text-slate-100'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 {code === 'zh' ? '中文' : code}
@@ -254,34 +254,34 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
         </div>
 
         {/* Hero Welcome */}
-        <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#121826] p-5">
-          <h1 className="text-xl font-extrabold tracking-tight text-slate-50">{t.welcome}</h1>
-          <p className="mt-1.5 text-sm text-slate-400">{t.subtitle}</p>
+        <div className="mt-5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-xs">
+          <h1 className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">{t.welcome}</h1>
+          <p className="mt-1.5 text-sm text-[var(--text-secondary)]">{t.subtitle}</p>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-white/[0.08] bg-[#0B0F17] p-3">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <Wifi className="h-3.5 w-3.5 text-emerald-400" />
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
+              <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <Wifi className="h-3.5 w-3.5 text-[var(--tone-emerald-fg)]" strokeWidth={1.75} />
                 {t.wifi}
               </div>
-              <p className="mt-1 text-sm font-bold text-slate-100">{state.integrations.wifiSsid}</p>
-              <p className="font-mono text-xs text-emerald-400">{state.integrations.wifiPass}</p>
+              <p className="mt-1 text-sm font-bold text-[var(--text-primary)]">{state.integrations.wifiSsid}</p>
+              <p className="font-mono text-xs text-[var(--tone-emerald-fg)]">{state.integrations.wifiPass}</p>
             </div>
-            <div className="rounded-xl border border-white/[0.08] bg-[#0B0F17] p-3">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <KeyRound className="h-3.5 w-3.5 text-amber-400" />
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
+              <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <KeyRound className="h-3.5 w-3.5 text-[var(--tone-amber-fg)]" strokeWidth={1.75} />
                 {t.door}
               </div>
-              <p className="mt-1 font-mono text-lg font-extrabold text-slate-50 tabular-nums">
+              <p className="mt-1 font-mono text-lg font-extrabold text-[var(--text-primary)] tabular-nums">
                 {state.integrations.doorCode}
               </p>
-              <p className="text-xs text-slate-400">{t.checkout}</p>
+              <p className="text-xs text-[var(--text-muted)]">{t.checkout}</p>
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--text-secondary)]">
             <span className="flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5 text-slate-500" />
+              <Clock className="h-3.5 w-3.5 text-[var(--text-muted)]" strokeWidth={1.75} />
               {t.breakfast}
             </span>
             <span>·</span>
@@ -290,8 +290,8 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
         </div>
 
         {lastRequested && (
-          <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-[var(--tone-emerald-border)] bg-[var(--tone-emerald-bg)] px-4 py-3 text-xs text-[var(--tone-emerald-fg)]">
+            <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             <span>
               <strong>{t.sent}:</strong> {lastRequested}
             </span>
@@ -299,7 +299,7 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
         )}
 
         {/* Services List */}
-        <h2 className="mt-6 mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">
+        <h2 className="mt-6 mb-3 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
           {t.servicesTitle}
         </h2>
         <div className="space-y-2.5">
@@ -310,18 +310,18 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
                 key={svc.key}
                 type="button"
                 onClick={() => handleRequest(svc.key, svc.title)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-[#121826] p-4 text-left transition hover:border-emerald-500/35 hover:bg-[#1A2234] active:scale-[0.99]"
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 text-left transition hover:border-[var(--tone-emerald-border)] hover:bg-[var(--bg-elevated)] active:scale-[0.99]"
               >
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-xl bg-[#0B0F17] p-2.5">
-                    <Icon className={`h-5 w-5 ${svc.accent}`} />
+                  <div className="mt-0.5 rounded-xl bg-[var(--bg-canvas)] p-2.5">
+                    <Icon className={`h-5 w-5 ${svc.accent}`} strokeWidth={1.75} />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-100">{svc.title}</p>
-                    <p className="mt-0.5 text-xs text-slate-400">{svc.desc}</p>
+                    <p className="text-sm font-bold text-[var(--text-primary)]">{svc.title}</p>
+                    <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{svc.desc}</p>
                   </div>
                 </div>
-                <span className="shrink-0 rounded-lg bg-emerald-500/15 px-3 py-1.5 font-mono text-sm font-bold text-emerald-300 tabular-nums">
+                <span className="shrink-0 rounded-lg bg-[var(--tone-emerald-bg)] px-3 py-1.5 font-mono text-sm font-bold text-[var(--tone-emerald-fg)] tabular-nums">
                   {svc.price}
                 </span>
               </button>
@@ -333,9 +333,9 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
         <div className="mt-8 flex justify-center">
           <a
             href="/"
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300"
+            className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             {t.adminBack}
           </a>
         </div>

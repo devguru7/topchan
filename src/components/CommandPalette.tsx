@@ -40,25 +40,12 @@ export const CommandPalette: React.FC = () => {
 
   useEffect(() => {
     if (commandPaletteOpen) {
-      setTimeout(() => inputRef.current?.focus(), 40);
+      window.setTimeout(() => inputRef.current?.focus(), 40);
     } else {
       setQuery('');
       voice.stop();
     }
   }, [commandPaletteOpen, voice.stop]);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setCommandPaletteOpen((open) => !open);
-      } else if (e.key === 'Escape' && commandPaletteOpen) {
-        setCommandPaletteOpen(false);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [commandPaletteOpen, setCommandPaletteOpen]);
 
   const parsed = useMemo(() => {
     if (query.trim().length < 5) return null;
@@ -102,7 +89,8 @@ export const CommandPalette: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 pt-[10vh]"
+          style={{ backgroundColor: 'var(--backdrop-scrim)' }}
+          className="fixed inset-0 z-50 backdrop-blur-xs flex items-start justify-center p-4 pt-[10vh] no-print"
           onClick={() => setCommandPaletteOpen(false)}
         >
           <motion.div
@@ -113,10 +101,10 @@ export const CommandPalette: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label="Палитра команд Topchan Ops"
-            className="w-full max-w-2xl bg-[#121826] border border-white/[0.12] rounded-2xl shadow-2xl overflow-hidden"
+            className="w-full max-w-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-2xl shadow-xl overflow-hidden"
           >
-            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.08]">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--border-subtle)]">
+              <Search className="w-4 h-4 text-[var(--text-muted)] shrink-0" strokeWidth={1.75} />
               <input
                 ref={inputRef}
                 type="text"
@@ -129,82 +117,124 @@ export const CommandPalette: React.FC = () => {
                   }
                 }}
                 placeholder="Команда («Смолл 3, Алекс Ким, 2 ночи, дал $50...») или поиск гостя..."
-                className="flex-1 bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+                className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
               <button
                 type="button"
                 onClick={voice.toggle}
                 aria-label="Голосовая диктовка"
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                style={
                   voice.isListening
-                    ? 'bg-[#F43F5E]/20 text-[#F43F5E] border border-[#F43F5E]/40'
-                    : 'bg-[#1A2234] text-slate-300 hover:text-white border border-white/[0.08]'
+                    ? {
+                        backgroundColor: 'var(--tone-rose-bg)',
+                        color: 'var(--tone-rose-fg)',
+                        borderColor: 'var(--tone-rose-border)',
+                      }
+                    : undefined
+                }
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 border ${
+                  voice.isListening
+                    ? ''
+                    : 'bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
                 }`}
               >
-                {voice.isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                {voice.isListening ? (
+                  <MicOff className="w-3.5 h-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Mic className="w-3.5 h-3.5" strokeWidth={1.75} />
+                )}
                 {voice.isListening ? 'Стоп...' : 'Голос'}
               </button>
               <button
                 type="button"
                 aria-label="Закрыть палитру"
                 onClick={() => setCommandPaletteOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg"
+                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-xl"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" strokeWidth={1.75} />
               </button>
             </div>
+
             {voice.isListening && (
-              <div className="px-4 py-2 bg-[#F43F5E]/10 border-b border-[#F43F5E]/25 text-xs text-rose-200 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#F43F5E] animate-ping" />
+              <div
+                className="px-4 py-2 border-b text-xs flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--tone-rose-bg)',
+                  borderColor: 'var(--tone-rose-border)',
+                  color: 'var(--tone-rose-fg)',
+                }}
+              >
+                <span
+                  className="w-2 h-2 rounded-full animate-ping"
+                  style={{ backgroundColor: 'var(--tone-rose-fg)' }}
+                />
                 <span>Диктовка (ru-RU){voice.interimText ? `: ${voice.interimText}` : '...'}</span>
               </div>
             )}
 
             <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-              {/* Parsed Zero-Typing preview */}
+              {/* Parsed Quick Command Preview */}
               {parsed && (
-                <div className="bg-[#0B0F17] border border-[#3B82F6]/30 rounded-xl p-4 space-y-3">
+                <div
+                  className="rounded-xl p-4 space-y-3 border"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    borderColor: 'var(--tone-cobalt-border)',
+                  }}
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-medium text-[#3B82F6]">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Автопилот готов провести команду</span>
+                    <div
+                      className="flex items-center gap-2 text-xs font-semibold"
+                      style={{ color: 'var(--tone-cobalt-fg)' }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      <span>Автопилот готов провести операцию</span>
                     </div>
-                    <span className="text-xs text-slate-400 tabular-nums">
+                    <span className="text-xs text-[var(--text-muted)] tabular-nums">
                       {parsed.confidenceNote}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <div>
-                      <div className="text-slate-400">Номер и гость</div>
-                      <div className="text-white font-semibold mt-0.5">{parsed.roomLabel}</div>
-                      <div className="text-slate-300">{parsed.guestName}</div>
+                      <div className="text-[var(--text-muted)]">Номер и гость</div>
+                      <div className="text-[var(--text-primary)] font-semibold mt-0.5">
+                        {parsed.roomLabel}
+                      </div>
+                      <div className="text-[var(--text-secondary)]">{parsed.guestName}</div>
                     </div>
                     <div>
-                      <div className="text-slate-400">Итого к оплате</div>
-                      <div className="text-white font-semibold font-mono tabular-nums mt-0.5">
+                      <div className="text-[var(--text-muted)]">Итого к оплате</div>
+                      <div className="text-[var(--text-primary)] font-semibold font-mono tabular-nums mt-0.5">
                         {formatUsd(parsed.totalUsd)}
                       </div>
-                      <div className="text-slate-400">
+                      <div className="text-[var(--text-muted)]">
                         {parsed.nights} н.
                         {parsed.extras.length > 0 ? ` + ${parsed.extras.length} доп.` : ''}
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-400">Внесено</div>
-                      <div className="text-[#10B981] font-semibold font-mono tabular-nums mt-0.5">
+                      <div className="text-[var(--text-muted)]">Внесено</div>
+                      <div
+                        className="font-semibold font-mono tabular-nums mt-0.5"
+                        style={{ color: 'var(--tone-emerald-fg)' }}
+                      >
                         {parsed.paidAmount > 0
                           ? `${parsed.paidAmount} ${parsed.paidCurrency}`
                           : 'Без оплаты'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-400">
+                      <div className="text-[var(--text-muted)]">
                         {parsed.debtUsd > 0 ? 'Остаток долга' : 'Сдача'}
                       </div>
                       <div
-                        className={`font-semibold font-mono tabular-nums mt-0.5 ${
-                          parsed.debtUsd > 0 ? 'text-[#F43F5E]' : 'text-[#F59E0B]'
-                        }`}
+                        className="font-semibold font-mono tabular-nums mt-0.5"
+                        style={{
+                          color:
+                            parsed.debtUsd > 0
+                              ? 'var(--tone-rose-fg)'
+                              : 'var(--tone-amber-fg)',
+                        }}
                       >
                         {parsed.debtUsd > 0
                           ? formatUsd(parsed.debtUsd)
@@ -219,24 +249,26 @@ export const CommandPalette: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleCommit}
-                    className="w-full py-2.5 px-4 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     Подтвердить и провести в 1 клик
-                    <ArrowRight className="w-4 h-4" />
+                    <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                   </button>
                 </div>
               )}
 
               {/* Presets */}
               <div className="space-y-2">
-                <div className="text-xs font-medium text-slate-400">Примеры голосовых команд</div>
+                <div className="text-xs font-medium text-[var(--text-muted)]">
+                  Примеры быстрых команд
+                </div>
                 <div className="flex flex-col gap-1.5">
                   {COMMAND_PRESETS.map((preset) => (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => setQuery(preset)}
-                      className="text-left px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.06] text-xs text-slate-200 transition-colors"
+                      className="text-left px-3 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                       {preset}
                     </button>
@@ -252,10 +284,14 @@ export const CommandPalette: React.FC = () => {
                     setCommandPaletteOpen(false);
                     openCheckInModal();
                   }}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#1A2234] hover:bg-slate-700/70 text-xs font-medium text-white border border-white/[0.06] transition-colors"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
                 >
-                  <UserPlus className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
-                  <span className="truncate">Новое заселение</span>
+                  <UserPlus
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-emerald-fg)' }}
+                  />
+                  <span className="truncate">Заселить гостя</span>
                 </button>
                 <button
                   type="button"
@@ -263,9 +299,13 @@ export const CommandPalette: React.FC = () => {
                     setActiveTab('grid');
                     setCommandPaletteOpen(false);
                   }}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#1A2234] hover:bg-slate-700/70 text-xs font-medium text-white border border-white/[0.06] transition-colors"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
                 >
-                  <BedDouble className="w-3.5 h-3.5 text-[#3B82F6] shrink-0" />
+                  <BedDouble
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-cobalt-fg)' }}
+                  />
                   <span className="truncate">Шахматка</span>
                 </button>
                 <button
@@ -274,10 +314,14 @@ export const CommandPalette: React.FC = () => {
                     setActiveTab('cash');
                     setCommandPaletteOpen(false);
                   }}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#1A2234] hover:bg-slate-700/70 text-xs font-medium text-white border border-white/[0.06] transition-colors"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
                 >
-                  <Banknote className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
-                  <span className="truncate">Касса (6 карманов)</span>
+                  <Banknote
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-amber-fg)' }}
+                  />
+                  <span className="truncate">Касса</span>
                 </button>
                 <button
                   type="button"
@@ -285,9 +329,13 @@ export const CommandPalette: React.FC = () => {
                     setActiveTab('services');
                     setCommandPaletteOpen(false);
                   }}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#1A2234] hover:bg-slate-700/70 text-xs font-medium text-white border border-white/[0.06] transition-colors"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors"
                 >
-                  <WashingMachine className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <WashingMachine
+                    className="w-3.5 h-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-cobalt-fg)' }}
+                  />
                   <span className="truncate">Стирка и QR</span>
                 </button>
               </div>
@@ -295,8 +343,10 @@ export const CommandPalette: React.FC = () => {
               {/* Active guests */}
               {matchingBookings.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-slate-400">Активные гости</div>
-                  <div className="divide-y divide-white/[0.06] border border-white/[0.06] rounded-xl overflow-hidden bg-[#0B0F17]">
+                  <div className="text-xs font-medium text-[var(--text-muted)]">
+                    Открыть счёт гостя
+                  </div>
+                  <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-xl overflow-hidden bg-[var(--bg-elevated)]">
                     {matchingBookings.map((b) => {
                       const room = state.physicalRooms.find(
                         (r) => r.id === b.segments[b.segments.length - 1]?.roomId
@@ -310,17 +360,20 @@ export const CommandPalette: React.FC = () => {
                             setSelectedBookingId(b.id);
                             setCommandPaletteOpen(false);
                           }}
-                          className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[#1A2234] transition-colors text-left"
+                          className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[var(--bg-hover)] transition-colors text-left"
                         >
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-white truncate">
+                            <div className="text-sm font-medium text-[var(--text-primary)] truncate">
                               {b.guests.map((g) => g.fullName).join(', ')}
                             </div>
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums">
                               {room?.code} · {b.bnovoId}
                             </div>
                           </div>
-                          <ArrowRight className="w-4 h-4 text-slate-500 shrink-0" />
+                          <ArrowRight
+                            className="w-4 h-4 text-[var(--text-muted)] shrink-0"
+                            strokeWidth={1.75}
+                          />
                         </button>
                       );
                     })}
@@ -329,10 +382,10 @@ export const CommandPalette: React.FC = () => {
               )}
             </div>
 
-            <div className="px-4 py-2.5 bg-[#0B0F17] border-t border-white/[0.08] flex items-center justify-between text-xs text-slate-400">
+            <div className="px-4 py-2.5 bg-[var(--bg-elevated)] border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-muted)]">
               <div className="flex items-center gap-1.5">
-                <Command className="w-3.5 h-3.5" />
-                <span>Ctrl+K / Cmd+K — вызов из любого раздела</span>
+                <Command className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>⌘K / Ctrl+K — быстрый вызов · 1–5 разделы · N заезд</span>
               </div>
               <span>Esc — закрыть</span>
             </div>

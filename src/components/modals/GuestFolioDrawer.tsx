@@ -25,12 +25,20 @@ import {
 } from '../../utils/math';
 import { addDaysIso, getTashkentTodayIso } from '../../utils/time';
 import { findAlternativeFreeRooms, findRoomConflicts } from '../../utils/availability';
+import { SegmentedControl, StatusPill } from '../ui';
+
+const EXTEND_MODE_OPTIONS = [
+  { id: 'extend' as const, label: 'Продлить здесь' },
+  { id: 'move' as const, label: 'Переселить' },
+];
 
 export const GuestFolioDrawer: React.FC = () => {
   const {
     state,
     selectedBookingId,
     setSelectedBookingId,
+    folioAutoOpenPayment,
+    clearFolioAutoOpenPayment,
     addLedgerCharge,
     addPayment,
     extendOrMoveStay,
@@ -53,22 +61,20 @@ export const GuestFolioDrawer: React.FC = () => {
   const [moveRoomKey, setMoveRoomKey] = useState('');
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectedBookingId) setSelectedBookingId(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedBookingId, setSelectedBookingId]);
-
-  useEffect(() => {
     if (!booking) return;
     const fin = calcBookingTotals(booking);
     setPayAmount(String(fin.debtUsd > 0 ? fin.debtUsd : 10));
     setPocketId('cash_usd');
     setPayCurrency('USD');
-    setShowPaymentForm(false);
     setShowExtendForm(false);
+    setShowPaymentForm(false);
   }, [booking?.id]);
+
+  useEffect(() => {
+    if (!booking || !folioAutoOpenPayment) return;
+    setShowPaymentForm(true);
+    clearFolioAutoOpenPayment();
+  }, [booking?.id, folioAutoOpenPayment, clearFolioAutoOpenPayment]);
 
   const availableRoomsForMove = useMemo(() => {
     const list: Array<{ key: string; roomId: string; bedId?: string; label: string; rate: number }> =
@@ -150,10 +156,13 @@ export const GuestFolioDrawer: React.FC = () => {
     }
   };
 
-  const targetMove = availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
-  const extFromDate = extendMode === 'move' ? getTashkentTodayIso() : (lastSeg?.toDate ?? getTashkentTodayIso());
+  const targetMove =
+    availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
+  const extFromDate =
+    extendMode === 'move' ? getTashkentTodayIso() : (lastSeg?.toDate ?? getTashkentTodayIso());
   const extToDate = addDaysIso(extFromDate, Math.max(1, extraNights));
-  const extTargetRoomId = extendMode === 'move' && targetMove ? targetMove.roomId : (lastSeg?.roomId ?? '');
+  const extTargetRoomId =
+    extendMode === 'move' && targetMove ? targetMove.roomId : (lastSeg?.roomId ?? '');
   const extTargetBedId = extendMode === 'move' ? targetMove?.bedId : lastSeg?.bedId;
   const extendConflicts = findRoomConflicts(
     state.bookings,
@@ -206,7 +215,8 @@ export const GuestFolioDrawer: React.FC = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-40 bg-black/65 backdrop-blur-xs flex justify-end"
+        className="fixed inset-0 z-40 backdrop-blur-xs flex justify-end"
+        style={{ backgroundColor: 'var(--backdrop-scrim)' }}
         onClick={() => setSelectedBookingId(null)}
       >
         <motion.div
@@ -216,78 +226,172 @@ export const GuestFolioDrawer: React.FC = () => {
           transition={{ type: 'spring', stiffness: 300, damping: 28 }}
           onClick={(e) => e.stopPropagation()}
           role="dialog"
-          aria-label={`Фолио гостя ${roomTitle}`}
-          className="w-full max-w-xl bg-[#121826] border-l border-white/[0.1] h-full flex flex-col shadow-2xl"
+          aria-label={`Счёт гостя ${roomTitle}`}
+          className="w-full max-w-xl bg-[var(--bg-surface)] border-l border-[var(--border-strong)] h-full flex flex-col shadow-2xl"
         >
           {/* Header */}
-          <div className="px-5 py-4 border-b border-white/[0.08] flex items-center justify-between gap-3">
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3 shrink-0">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <span className="font-mono">{booking.bnovoId}</span>
+              <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] flex-wrap">
+                <span className="font-mono tabular-nums">{booking.bnovoId}</span>
                 <span aria-hidden="true">·</span>
                 <span>{booking.source}</span>
                 {booking.checkingOutToday && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span className="text-[#F59E0B] font-medium">Выезд сегодня 12:00</span>
-                  </>
+                  <StatusPill tone="amber">Выезд сегодня 12:00</StatusPill>
                 )}
               </div>
-              <h2 className="text-lg font-semibold text-white truncate mt-0.5">{roomTitle}</h2>
+              <h2 className="text-lg font-semibold text-[var(--text-primary)] truncate mt-0.5">
+                Счёт гостя · {roomTitle}
+              </h2>
             </div>
             <button
               type="button"
-              aria-label="Закрыть карточку гостя"
+              aria-label="Закрыть счёт гостя"
               onClick={() => setSelectedBookingId(null)}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-[#1A2234]"
+              className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5" strokeWidth={1.75} />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
             {/* Financial Summary Bar */}
-            <div className="grid grid-cols-3 gap-3 bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4">
+            <div className="grid grid-cols-3 gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
               <div>
-                <div className="text-xs text-slate-400">Начислено</div>
-                <div className="text-lg font-semibold font-mono tabular-nums text-white mt-0.5">
+                <div className="text-xs text-[var(--text-muted)]">Начислено</div>
+                <div className="text-lg font-bold font-mono tabular-nums text-[var(--text-primary)] mt-1">
                   {formatUsd(financials.totalChargesUsd)}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-400">Оплачено</div>
-                <div className="text-lg font-semibold font-mono tabular-nums text-[#10B981] mt-0.5">
+                <div className="text-xs text-[var(--text-muted)]">Оплачено</div>
+                <div
+                  className="text-lg font-bold font-mono tabular-nums mt-1"
+                  style={{ color: 'var(--tone-emerald-fg)' }}
+                >
                   {formatUsd(financials.totalPaymentsUsd)}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-400">Долг</div>
+                <div className="text-xs text-[var(--text-muted)]">
+                  {financials.overpaidUsd > 0 ? 'Переплата' : 'Долг'}
+                </div>
                 <div
-                  className={`text-lg font-semibold font-mono tabular-nums mt-0.5 ${
-                    financials.debtUsd > 0 ? 'text-[#F43F5E]' : 'text-[#10B981]'
-                  }`}
+                  className="text-lg font-bold font-mono tabular-nums mt-1"
+                  style={{
+                    color:
+                      financials.debtUsd > 0
+                        ? 'var(--tone-rose-fg)'
+                        : financials.overpaidUsd > 0
+                          ? 'var(--tone-cobalt-fg)'
+                          : 'var(--tone-emerald-fg)',
+                  }}
                 >
-                  {formatUsd(financials.debtUsd)}
+                  {financials.overpaidUsd > 0
+                    ? formatUsd(financials.overpaidUsd)
+                    : formatUsd(financials.debtUsd)}
                 </div>
                 {financials.debtUsd > 0 && (
-                  <div className="text-xs font-mono tabular-nums text-slate-400">
+                  <div className="text-xs font-mono tabular-nums text-[var(--text-muted)]">
                     {formatUzs(calcAccommodationUzs(financials.debtUsd, state.currency.accRate))}
                   </div>
                 )}
               </div>
             </div>
 
+            {/* Split Payment Form (shown near top when triggered via + Оплата) */}
+            {showPaymentForm && (
+              <form
+                onSubmit={handlePaymentSubmit}
+                className="p-4 rounded-2xl border space-y-3"
+                style={{
+                  backgroundColor: 'var(--tone-emerald-bg)',
+                  borderColor: 'var(--tone-emerald-border)',
+                }}
+              >
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span style={{ color: 'var(--tone-emerald-fg)' }}>
+                    Принять оплату в кассу
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentForm(false)}
+                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    Скрыть
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                      Карман кассы
+                    </label>
+                    <select
+                      value={pocketId}
+                      onChange={(e) => {
+                        const p = e.target.value as CashPocketId;
+                        setPocketId(p);
+                        if (p === 'cash_usd') setPayCurrency('USD');
+                        else if (p === 'cash_eur') setPayCurrency('EUR');
+                        else setPayCurrency('UZS');
+                      }}
+                      className="ops-input w-full px-3 py-2 text-xs"
+                    >
+                      {state.pockets
+                        .filter((p) => p.id !== 'safe')
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                      Сумма ({payCurrency})
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-secondary)] font-mono tabular-nums">
+                  <span>Эквивалент: {formatUsd(payUsdEq)}</span>
+                  {changeUzsOut > 0 && (
+                    <span style={{ color: 'var(--tone-amber-fg)' }} className="font-semibold">
+                      Сдача сумами: {formatUzs(changeUzsOut)}
+                    </span>
+                  )}
+                  {!isCashPocket && (
+                    <span className="text-[var(--text-muted)]">Безнал (без сдачи)</span>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className="w-full py-2.5 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <ShieldCheck className="w-4 h-4" strokeWidth={1.75} />
+                  Провести оплату в кассу
+                </button>
+              </form>
+            )}
+
             {/* Guests List */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-300">
+                <span className="font-semibold text-[var(--text-secondary)]">
                   Гости в номере ({booking.guests.length})
                 </span>
-                <span className="text-slate-400 font-mono tabular-nums">
+                <span className="text-[var(--text-muted)] font-mono tabular-nums">
                   Турсбор: {formatUzs(touristTaxUzs)}
                 </span>
               </div>
-              <div className="divide-y divide-white/[0.06] border border-white/[0.08] rounded-xl bg-[#0B0F17] overflow-hidden">
+              <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-2xl bg-[var(--bg-elevated)] overflow-hidden">
                 {booking.guests.map((guest) => {
                   const profile = state.guestProfiles.find(
                     (p) => p.passportNo === guest.passportNo
@@ -296,34 +400,29 @@ export const GuestFolioDrawer: React.FC = () => {
                     <div key={guest.id} className="p-3.5 flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-white">
+                          <span className="text-sm font-semibold text-[var(--text-primary)]">
                             {guest.fullName}
                           </span>
                           {profile?.tag === 'vip' && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#F59E0B]">
-                              <Sparkles className="w-3.5 h-3.5" />
+                            <StatusPill tone="amber" icon={Sparkles}>
                               VIP · визит #{profile.visitsCount}
-                            </span>
+                            </StatusPill>
                           )}
                           {guest.age < 16 && (
-                            <span className="text-xs text-[#3B82F6]">
+                            <StatusPill tone="cobalt">
                               Ребёнок ({guest.age} лет · 0 турсбор)
-                            </span>
+                            </StatusPill>
                           )}
                         </div>
-                        <div className="text-xs text-slate-400 font-mono tabular-nums mt-0.5">
+                        <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums mt-1">
                           {guest.citizenship} · {guest.passportNo} · ДР {guest.dob}
                         </div>
                       </div>
-                      <div className="text-right text-xs shrink-0">
-                        <div
-                          className={
-                            guest.emehmonRegistered ? 'text-[#10B981]' : 'text-[#F59E0B]'
-                          }
-                        >
+                      <div className="text-right text-xs shrink-0 space-y-1">
+                        <StatusPill tone={guest.emehmonRegistered ? 'emerald' : 'amber'}>
                           {guest.emehmonRegistered ? 'E-mehmon ✓' : 'Нет E-mehmon'}
-                        </div>
-                        <div className="text-slate-400 mt-0.5">
+                        </StatusPill>
+                        <div className="text-[var(--text-muted)]">
                           {guest.keyIssued ? 'Ключ на руках' : 'Без ключа'}
                         </div>
                       </div>
@@ -332,16 +431,18 @@ export const GuestFolioDrawer: React.FC = () => {
                 })}
               </div>
               {booking.notes && (
-                <p className="text-xs text-slate-300 bg-[#0B0F17] border border-white/[0.06] rounded-lg px-3 py-2">
+                <p className="text-xs text-[var(--text-secondary)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl px-3.5 py-2.5 leading-relaxed">
                   {booking.notes}
                 </p>
               )}
             </div>
 
-            {/* Stay Segments + Extend/Move */}
+            {/* Stay Periods + Extend / Move */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">Сегменты проживания</span>
+                <span className="text-xs font-semibold text-[var(--text-secondary)]">
+                  Продление и переезд
+                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -350,9 +451,10 @@ export const GuestFolioDrawer: React.FC = () => {
                       setMoveRoomKey(availableRoomsForMove[0].key);
                     }
                   }}
-                  className="text-xs font-medium text-[#3B82F6] hover:underline inline-flex items-center gap-1"
+                  className="text-xs font-semibold hover:underline inline-flex items-center gap-1"
+                  style={{ color: 'var(--tone-cobalt-fg)' }}
                 >
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <ArrowRightLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
                   Продлить / Переселить
                 </button>
               </div>
@@ -363,13 +465,13 @@ export const GuestFolioDrawer: React.FC = () => {
                   return (
                     <div
                       key={seg.id}
-                      className="px-3.5 py-2.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] flex items-center justify-between text-xs"
+                      className="px-3.5 py-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-between gap-2 text-xs"
                     >
-                      <span className="font-medium text-white">
+                      <span className="font-semibold text-[var(--text-primary)]">
                         {r?.code ?? seg.roomId}
                         {bd ? ` · Койка ${bd.label}` : ''}
                       </span>
-                      <span className="font-mono tabular-nums text-slate-300">
+                      <span className="font-mono tabular-nums text-[var(--text-secondary)]">
                         {seg.fromDate} → {seg.toDate} ({seg.nights} н. × ${seg.nightlyRateUsd})
                       </span>
                     </div>
@@ -380,51 +482,43 @@ export const GuestFolioDrawer: React.FC = () => {
               {showExtendForm && (
                 <form
                   onSubmit={handleExtendSubmit}
-                  className="p-3.5 rounded-xl bg-[#0B0F17] border border-[#3B82F6]/30 space-y-3"
+                  className="p-4 rounded-2xl bg-[var(--bg-elevated)] border space-y-3"
+                  style={{ borderColor: 'var(--tone-cobalt-border)' }}
                 >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setExtendMode('extend')}
-                      className={`py-1.5 rounded-lg text-xs font-medium ${
-                        extendMode === 'extend'
-                          ? 'bg-[#3B82F6] text-white'
-                          : 'bg-[#1A2234] text-slate-300'
-                      }`}
-                    >
-                      Продлить здесь
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExtendMode('move')}
-                      className={`py-1.5 rounded-lg text-xs font-medium ${
-                        extendMode === 'move'
-                          ? 'bg-[#3B82F6] text-white'
-                          : 'bg-[#1A2234] text-slate-300'
-                      }`}
-                    >
-                      Переселить в другую
-                    </button>
-                  </div>
+                  <SegmentedControl
+                    options={EXTEND_MODE_OPTIONS}
+                    value={extendMode}
+                    onChange={setExtendMode}
+                    layoutId="folioExtendMode"
+                    ariaLabel="Режим продления или переселения"
+                    size="sm"
+                    fullWidth
+                  />
                   <div className="grid grid-cols-2 gap-2.5">
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">Кол-во ночей</label>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">
+                        Кол-во ночей
+                      </label>
                       <input
                         type="number"
                         min={1}
                         max={30}
                         value={extraNights}
-                        onChange={(e) => setExtraNights(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                        className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 font-mono text-xs text-white"
+                        onChange={(e) =>
+                          setExtraNights(Math.max(1, parseInt(e.target.value, 10) || 1))
+                        }
+                        className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
                       />
                     </div>
                     {extendMode === 'move' && (
                       <div>
-                        <label className="block text-xs text-slate-400 mb-1">Новая комната</label>
+                        <label className="block text-xs text-[var(--text-muted)] mb-1">
+                          Новая комната
+                        </label>
                         <select
                           value={moveRoomKey}
                           onChange={(e) => setMoveRoomKey(e.target.value)}
-                          className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-2 py-2 text-xs text-white"
+                          className="ops-input w-full px-2.5 py-2 text-xs"
                         >
                           {availableRoomsForMove.map((o) => (
                             <option key={o.key} value={o.key}>
@@ -436,12 +530,22 @@ export const GuestFolioDrawer: React.FC = () => {
                     )}
                   </div>
                   {extendConflicts.length > 0 && (
-                    <div className="rounded-lg border border-[#F43F5E]/40 bg-[#F43F5E]/10 p-2.5 text-xs text-rose-200 space-y-2">
+                    <div
+                      className="rounded-xl border p-3 text-xs space-y-2"
+                      style={{
+                        backgroundColor: 'var(--tone-rose-bg)',
+                        borderColor: 'var(--tone-rose-border)',
+                      }}
+                    >
                       <div className="flex items-start gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-[#F43F5E] shrink-0 mt-0.5" />
-                        <span>
-                          Конфликт дат ({extFromDate} → {extToDate}) с {extendConflicts[0].guestName}.
-                          Переселите в свободную комнату:
+                        <AlertTriangle
+                          className="w-4 h-4 shrink-0 mt-0.5"
+                          strokeWidth={1.75}
+                          style={{ color: 'var(--tone-rose-fg)' }}
+                        />
+                        <span className="text-[var(--text-secondary)]">
+                          Конфликт дат (<span className="font-mono">{extFromDate} → {extToDate}</span>)
+                          с {extendConflicts[0].guestName}. Выберите свободную комнату:
                         </span>
                       </div>
                       {extendAlternatives.length > 0 && (
@@ -456,7 +560,12 @@ export const GuestFolioDrawer: React.FC = () => {
                                   setExtendMode('move');
                                   setMoveRoomKey(key);
                                 }}
-                                className="px-2 py-1 rounded-md bg-[#10B981]/20 text-emerald-200 border border-[#10B981]/40 font-semibold"
+                                className="px-2.5 py-1 rounded-xl border font-semibold text-xs"
+                                style={{
+                                  backgroundColor: 'var(--tone-emerald-bg)',
+                                  borderColor: 'var(--tone-emerald-border)',
+                                  color: 'var(--tone-emerald-fg)',
+                                }}
                               >
                                 {alt.label}
                               </button>
@@ -469,7 +578,7 @@ export const GuestFolioDrawer: React.FC = () => {
                   <button
                     type="submit"
                     disabled={extendConflicts.length > 0}
-                    className="w-full py-2 rounded-lg bg-[#3B82F6] hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-xs font-semibold text-white"
+                    className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-xs font-semibold text-white transition-colors"
                   >
                     {extendMode === 'move' ? 'Подтвердить переселение' : 'Продлить проживание'}
                   </button>
@@ -479,8 +588,8 @@ export const GuestFolioDrawer: React.FC = () => {
 
             {/* 1-Click Extra Charges */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300">
-                Доп. услуги в 1 клик (добавляются в фолио)
+              <div className="text-xs font-semibold text-[var(--text-secondary)]">
+                Дополнительные услуги (в 1 клик)
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -488,13 +597,17 @@ export const GuestFolioDrawer: React.FC = () => {
                   onClick={() =>
                     addLedgerCharge(booking.id, 'late_breakfast', 'Поздний завтрак', 2)
                   }
-                  className="px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.08] text-xs text-slate-200 flex items-center justify-between transition-colors"
+                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] flex items-center justify-between transition-colors"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Coffee className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <Coffee
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-amber-fg)' }}
+                    />
                     Поздний завтрак
                   </span>
-                  <span className="font-mono tabular-nums text-white">$2</span>
+                  <span className="font-mono tabular-nums font-semibold">$2</span>
                 </button>
                 <button
                   type="button"
@@ -507,13 +620,17 @@ export const GuestFolioDrawer: React.FC = () => {
                       { startLaundryMode: 'fast' }
                     )
                   }
-                  className="px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.08] text-xs text-slate-200 flex items-center justify-between transition-colors"
+                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] flex items-center justify-between transition-colors"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <WashingMachine className="w-3.5 h-3.5 text-[#3B82F6]" />
+                    <WashingMachine
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-cobalt-fg)' }}
+                    />
                     Стирка 22 мин
                   </span>
-                  <span className="font-mono tabular-nums text-white">$2</span>
+                  <span className="font-mono tabular-nums font-semibold">$2</span>
                 </button>
                 <button
                   type="button"
@@ -526,13 +643,17 @@ export const GuestFolioDrawer: React.FC = () => {
                       { startLaundryMode: 'medium' }
                     )
                   }
-                  className="px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.08] text-xs text-slate-200 flex items-center justify-between transition-colors"
+                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] flex items-center justify-between transition-colors"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <WashingMachine className="w-3.5 h-3.5 text-cyan-400" />
+                    <WashingMachine
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-emerald-fg)' }}
+                    />
                     Стирка 55 мин
                   </span>
-                  <span className="font-mono tabular-nums text-white">$3</span>
+                  <span className="font-mono tabular-nums font-semibold">$3</span>
                 </button>
                 <button
                   type="button"
@@ -544,10 +665,10 @@ export const GuestFolioDrawer: React.FC = () => {
                       round2((lastSeg?.nightlyRateUsd ?? 18) * 0.5)
                     )
                   }
-                  className="px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#1A2234] border border-white/[0.08] text-xs text-slate-200 flex items-center justify-between transition-colors"
+                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] flex items-center justify-between transition-colors"
                 >
-                  <span>Ранний/Поздний +50%</span>
-                  <span className="font-mono tabular-nums text-white">
+                  <span className="truncate">Ранний/Поздний +50%</span>
+                  <span className="font-mono tabular-nums font-semibold">
                     {formatUsd(round2((lastSeg?.nightlyRateUsd ?? 18) * 0.5))}
                   </span>
                 </button>
@@ -556,97 +677,35 @@ export const GuestFolioDrawer: React.FC = () => {
                   onClick={() =>
                     addLedgerCharge(booking.id, 'penalty', 'Штраф (утеря ключа / ущерб)', 10)
                   }
-                  className="col-span-2 px-3 py-2 rounded-lg bg-[#0B0F17] hover:bg-[#F43F5E]/10 border border-white/[0.08] text-xs text-slate-200 flex items-center justify-between transition-colors"
+                  className="col-span-2 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--tone-rose-bg)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] flex items-center justify-between transition-colors"
                 >
                   <span>Штраф (утеря ключа / порча имущества)</span>
-                  <span className="font-mono tabular-nums text-[#F43F5E]">$10</span>
+                  <span
+                    className="font-mono tabular-nums font-semibold"
+                    style={{ color: 'var(--tone-rose-fg)' }}
+                  >
+                    $10
+                  </span>
                 </button>
               </div>
             </div>
 
-            {/* Split Payment Form */}
-            {showPaymentForm && (
-              <form
-                onSubmit={handlePaymentSubmit}
-                className="p-4 rounded-xl bg-[#0B0F17] border border-[#10B981]/35 space-y-3"
-              >
-                <div className="flex items-center justify-between text-xs font-semibold text-[#10B981]">
-                  <span>Принять оплату (сплит в любой из 6 карманов)</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowPaymentForm(false)}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    Скрыть
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">Карман кассы</label>
-                    <select
-                      value={pocketId}
-                      onChange={(e) => {
-                        const p = e.target.value as CashPocketId;
-                        setPocketId(p);
-                        if (p === 'cash_usd') setPayCurrency('USD');
-                        else if (p === 'cash_eur') setPayCurrency('EUR');
-                        else setPayCurrency('UZS');
-                      }}
-                      className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
-                    >
-                      {state.pockets
-                        .filter((p) => p.id !== 'safe')
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">
-                      Сумма ({payCurrency})
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-xs text-white"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-300 font-mono tabular-nums">
-                  <span>Эквивалент: {formatUsd(payUsdEq)}</span>
-                  {changeUzsOut > 0 && (
-                    <span className="text-[#F59E0B]">Сдача сумами: {formatUzs(changeUzsOut)}</span>
-                  )}
-                </div>
-                <button
-                  type="submit"
-                  className="w-full py-2.5 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-xs font-semibold flex items-center justify-center gap-1.5"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  Провести оплату в кассу
-                </button>
-              </form>
-            )}
-
-            {/* Financial Ledger */}
+            {/* Payment & Charge History */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300">
-                История фолио ({booking.ledgerEntries.length})
+              <div className="text-xs font-semibold text-[var(--text-secondary)]">
+                История оплат и начислений ({booking.ledgerEntries.length})
               </div>
-              <div className="divide-y divide-white/[0.06] border border-white/[0.08] rounded-xl bg-[#0B0F17] overflow-hidden">
+              <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-2xl bg-[var(--bg-elevated)] overflow-hidden">
                 {booking.ledgerEntries.map((entry) => (
                   <div
                     key={entry.id}
                     className="px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs"
                   >
                     <div className="min-w-0">
-                      <div className="text-slate-200 truncate">{entry.label}</div>
-                      <div className="text-slate-500">
+                      <div className="text-[var(--text-primary)] font-medium truncate">
+                        {entry.label}
+                      </div>
+                      <div className="text-[var(--text-muted)]">
                         {entry.actor}
                         {entry.originalAmount && entry.originalCurrency !== 'USD'
                           ? ` · ${entry.originalAmount.toLocaleString('ru-RU')} ${entry.originalCurrency}`
@@ -654,9 +713,13 @@ export const GuestFolioDrawer: React.FC = () => {
                       </div>
                     </div>
                     <div
-                      className={`font-mono tabular-nums font-semibold shrink-0 ${
-                        entry.type === 'payment' ? 'text-[#10B981]' : 'text-white'
-                      }`}
+                      className="font-mono tabular-nums font-semibold shrink-0"
+                      style={{
+                        color:
+                          entry.type === 'payment'
+                            ? 'var(--tone-emerald-fg)'
+                            : 'var(--text-primary)',
+                      }}
                     >
                       {entry.type === 'payment' ? '−' : '+'}
                       {formatUsd(entry.amountUsd)}
@@ -668,23 +731,23 @@ export const GuestFolioDrawer: React.FC = () => {
           </div>
 
           {/* Sticky Drawer Footer */}
-          <div className="p-4 border-t border-white/[0.08] bg-[#0B0F17] flex items-center gap-3">
+          <div className="p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] flex items-center gap-3 shrink-0">
             <button
               type="button"
               onClick={() => setShowPaymentForm((v) => !v)}
-              className="flex-1 py-2.5 px-4 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 px-4 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-sm font-semibold transition-colors inline-flex items-center justify-center gap-1.5"
             >
-              <Plus className="w-4 h-4" />
-              <Banknote className="w-4 h-4" />
+              <Plus className="w-4 h-4" strokeWidth={1.75} />
+              <Banknote className="w-4 h-4" strokeWidth={1.75} />
               Оплата
             </button>
             <button
               type="button"
               onClick={() => openCheckOutModal(booking.id)}
-              className="flex-1 py-2.5 px-4 rounded-lg bg-[#1A2234] hover:bg-[#F59E0B] hover:text-slate-950 text-white border border-white/[0.1] text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-strong)] text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
             >
-              <DoorOpen className="w-4 h-4" />
-              Выселить (Check-out)
+              <DoorOpen className="w-4 h-4" strokeWidth={1.75} />
+              Выселить
             </button>
           </div>
         </motion.div>

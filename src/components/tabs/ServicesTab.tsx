@@ -4,7 +4,6 @@ import {
   Briefcase,
   Camera,
   CheckCircle2,
-  Copy,
   FastForward,
   Minus,
   Package,
@@ -19,8 +18,10 @@ import {
   Wifi,
 } from 'lucide-react';
 import { useOps, useTimers } from '../../context/OpsContext';
+import type { ServicesSubTab } from '../../context/UIContext';
 import type { GuestLang, LaundryJob, TransferStatus } from '../../types/ops';
 import { formatTimer } from '../../utils/math';
+import { CopyButton, EmptyState, SegmentedControl, StatusPill, type StatusTone } from '../ui';
 
 const QR_COPY: Record<
   GuestLang,
@@ -87,11 +88,18 @@ const QR_COPY: Record<
   },
 };
 
-const TRANSFER_STATUS_LABEL: Record<TransferStatus, { text: string; color: string }> = {
-  assigned: { text: 'Назначен', color: 'text-[#3B82F6]' },
-  en_route: { text: 'В пути', color: 'text-[#F59E0B]' },
-  picked_up: { text: 'Забрал', color: 'text-[#10B981]' },
+const TRANSFER_STATUS_META: Record<TransferStatus, { text: string; tone: StatusTone }> = {
+  assigned: { text: 'Назначен', tone: 'cobalt' },
+  en_route: { text: 'В пути', tone: 'amber' },
+  picked_up: { text: 'Забрал', tone: 'emerald' },
 };
+
+const LANG_OPTIONS: ReadonlyArray<{ id: GuestLang; label: string }> = [
+  { id: 'ru', label: 'RU' },
+  { id: 'en', label: 'EN' },
+  { id: 'uz', label: 'UZ' },
+  { id: 'zh', label: '中文' },
+];
 
 const REVIEW_TEMPLATES: Record<GuestLang, (guest: string) => string> = {
   ru: (guest) =>
@@ -128,46 +136,59 @@ const LaundryJobCard: React.FC<{
       : 100;
 
   return (
-    <div className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] space-y-2.5">
+    <div className="p-4 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-white">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-[var(--text-primary)] truncate">
             {job.roomLabel} · {job.guestName}
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-[var(--text-muted)]">
             {job.mode === 'fast' ? 'Быстрая 22 мин ($2)' : 'Средняя 55 мин ($3)'}
           </div>
         </div>
-        <div className="text-right">
-          <div
-            className={`text-lg font-bold font-mono tabular-nums ${
-              job.status === 'completed' ? 'text-[#10B981]' : 'text-[#3B82F6]'
-            }`}
-          >
-            {job.status === 'completed' ? 'Готово!' : formatTimer(remaining)}
-          </div>
+        <div
+          className="text-lg font-bold font-mono tabular-nums shrink-0"
+          style={{
+            color:
+              job.status === 'completed' ? 'var(--tone-emerald-fg)' : 'var(--tone-cobalt-fg)',
+          }}
+        >
+          {job.status === 'completed' ? 'Готово!' : formatTimer(remaining)}
         </div>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-[#1A2234] overflow-hidden">
+
+      {/* Animated Progress Bar */}
+      <div className="w-full h-2 rounded-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] overflow-hidden">
         <div
-          className={`h-full transition-all duration-500 ${
-            job.status === 'completed' ? 'bg-[#10B981]' : 'bg-[#3B82F6]'
-          }`}
-          style={{ width: `${pct}%` }}
+          className="h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${pct}%`,
+            backgroundColor: job.status === 'completed' ? '#059669' : '#2563EB',
+          }}
         />
       </div>
-      {job.status === 'running' && (
-        <div className="flex justify-end">
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-mono tabular-nums text-[var(--text-muted)]">
+          Прогресс: {pct}%
+        </span>
+        {job.status === 'running' ? (
           <button
             type="button"
             onClick={() => onSpeedUp(job.id, 10)}
-            className="px-2.5 py-1 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs text-slate-200 inline-flex items-center gap-1.5 border border-white/[0.08]"
+            className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 border border-[var(--border-subtle)] transition-colors"
           >
-            <FastForward className="w-3.5 h-3.5 text-[#F59E0B]" />
-            +10 мин тест
+            <FastForward
+              className="w-3.5 h-3.5 shrink-0"
+              strokeWidth={1.75}
+              style={{ color: 'var(--tone-amber-fg)' }}
+            />
+            +10 мин (ускорить)
           </button>
-        </div>
-      )}
+        ) : (
+          <StatusPill tone="emerald">Завершено</StatusPill>
+        )}
+      </div>
     </div>
   );
 };
@@ -175,6 +196,8 @@ const LaundryJobCard: React.FC<{
 export const ServicesTab: React.FC = () => {
   const {
     state,
+    servicesSubTab,
+    setServicesSubTab,
     startLaundryJob,
     speedUpLaundry,
     maidMarkCleaned,
@@ -224,6 +247,45 @@ export const ServicesTab: React.FC = () => {
 
   const qrCopy = QR_COPY[qrLang];
   const pendingHkTasks = state.housekeepingTasks.filter((t) => t.status !== 'approved');
+  const activeLaundryCount = state.laundryJobs.filter((j) => j.status === 'running').length;
+  const storedLuggageCount = state.luggageItems.filter((l) => l.status === 'stored').length;
+  const lowStockCount = state.stockItems.filter((i) => i.quantity <= i.minThreshold).length;
+
+  const subTabOptions = useMemo<
+    Array<{
+      id: ServicesSubTab;
+      label: string;
+      icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+      badge?: number;
+    }>
+  >(
+    () => [
+      {
+        id: 'laundry_hk',
+        label: 'Стирка и уборка',
+        icon: WashingMachine,
+        badge: pendingHkTasks.length + activeLaundryCount,
+      },
+      {
+        id: 'luggage_transfers',
+        label: 'Багаж и трансферы',
+        icon: Briefcase,
+        badge: storedLuggageCount,
+      },
+      {
+        id: 'stock_contacts',
+        label: 'Запасы и контакты',
+        icon: Package,
+        badge: lowStockCount,
+      },
+      {
+        id: 'qr_guide',
+        label: 'QR-гид гостя',
+        icon: QrCode,
+      },
+    ],
+    [pendingHkTasks.length, activeLaundryCount, storedLuggageCount, lowStockCount]
+  );
 
   const handleStartLaundry = (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,471 +335,463 @@ export const ServicesTab: React.FC = () => {
   const selectedQrBooking =
     activeBookings.find((b) => b.id === qrBookingId) ?? activeBookings[0];
 
+  const reviewTargetGuestName =
+    (state.bookings.find((b) => b.id === reviewBookingId) ?? state.bookings[0])?.guests[0]
+      ?.fullName ?? 'Гость';
+  const reviewMessageText = REVIEW_TEMPLATES[reviewLang](reviewTargetGuestName);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-          Сервисы, Горничные и Гостевой QR-консьерж
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-          Таймеры стирки · приёмка комнат · багаж и трансферы в аэропорт (3 км) · расходники ·
-          симулятор QR-телефона
-        </p>
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+            Сервисы, Уборка и QR-гид гостя
+          </h1>
+          <p className="text-xs sm:text-sm text-[var(--text-muted)] mt-0.5">
+            Таймеры стирки, приёмка комнат, багаж, трансферы в аэропорт и гостевой QR-консьерж
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => openQrPosterModal()}
+          className="px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+        >
+          <Printer
+            className="w-4 h-4 shrink-0"
+            strokeWidth={1.75}
+            style={{ color: 'var(--tone-emerald-fg)' }}
+          />
+          Распечатать QR-постер
+        </button>
       </div>
 
-      {/* Row 1: Laundry Timers + Housekeeping Queue */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Washing Machine Live Timers */}
-        <section className="lg:col-span-6 bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <WashingMachine className="w-4 h-4 text-[#3B82F6]" />
-              <h2 className="text-sm font-semibold text-white">Стиральная машина (таймеры)</h2>
-            </div>
-            <span className="text-xs text-slate-400">22 мин ($2) · 55 мин ($3)</span>
-          </div>
+      {/* Sub-Tab Switcher */}
+      <SegmentedControl
+        options={subTabOptions}
+        value={servicesSubTab}
+        onChange={setServicesSubTab}
+        layoutId="servicesSubTab"
+        ariaLabel="Разделы сервисов"
+      />
 
-          <form onSubmit={handleStartLaundry} className="space-y-3 bg-[#0B0F17] border border-white/[0.08] rounded-xl p-3.5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <select
-                aria-label="Выберите гостя для стирки"
-                value={laundryBookingId}
-                onChange={(e) => setLaundryBookingId(e.target.value)}
-                className="bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
-              >
-                {activeBookings.map((b) => {
-                  const rm = state.physicalRooms.find(
-                    (r) => r.id === b.segments[b.segments.length - 1]?.roomId
-                  );
-                  return (
-                    <option key={b.id} value={b.id}>
-                      {rm?.code} · {b.guests[0]?.fullName}
-                    </option>
-                  );
-                })}
-              </select>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setLaundryMode('fast')}
-                  className={`py-2 px-2 rounded-lg text-xs font-medium transition-colors ${
-                    laundryMode === 'fast'
-                      ? 'bg-[#3B82F6] text-white'
-                      : 'bg-[#121826] text-slate-300 border border-white/[0.08]'
-                  }`}
+      {/* SUB-TAB 1: Laundry & Housekeeping */}
+      {servicesSubTab === 'laundry_hk' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Washing Machine Live Timers */}
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <WashingMachine
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-cobalt-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Стиральная машина
+                </h2>
+              </div>
+              <StatusPill tone="neutral" mono>
+                22 мин ($2) · 55 мин ($3)
+              </StatusPill>
+            </div>
+
+            <form
+              onSubmit={handleStartLaundry}
+              className="space-y-3 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] p-4"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <select
+                  aria-label="Выберите гостя для стирки"
+                  value={laundryBookingId}
+                  onChange={(e) => setLaundryBookingId(e.target.value)}
+                  className="ops-input px-3 py-2 text-xs"
                 >
-                  22 мин · $2
-                </button>
+                  {activeBookings.map((b) => {
+                    const rm = state.physicalRooms.find(
+                      (r) => r.id === b.segments[b.segments.length - 1]?.roomId
+                    );
+                    return (
+                      <option key={b.id} value={b.id}>
+                        {rm?.code} · {b.guests[0]?.fullName}
+                      </option>
+                    );
+                  })}
+                </select>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setLaundryMode('fast')}
+                    className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-colors ${
+                      laundryMode === 'fast'
+                        ? 'bg-[#2563EB] text-white border-transparent'
+                        : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)]'
+                    }`}
+                  >
+                    22 мин · $2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLaundryMode('medium')}
+                    className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-colors ${
+                      laundryMode === 'medium'
+                        ? 'bg-[#2563EB] text-white border-transparent'
+                        : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)]'
+                    }`}
+                  >
+                    55 мин · $3
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={chargeLaundry}
+                    onChange={(e) => setChargeLaundry(e.target.checked)}
+                    className="w-4 h-4 accent-[#059669]"
+                  />
+                  Добавить в счёт гостя
+                </label>
                 <button
-                  type="button"
-                  onClick={() => setLaundryMode('medium')}
-                  className={`py-2 px-2 rounded-lg text-xs font-medium transition-colors ${
-                    laundryMode === 'medium'
-                      ? 'bg-[#3B82F6] text-white'
-                      : 'bg-[#121826] text-slate-300 border border-white/[0.08]'
-                  }`}
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold whitespace-nowrap transition-colors"
                 >
-                  55 мин · $3
+                  Запустить стирку
                 </button>
               </div>
-            </div>
+            </form>
 
+            {state.laundryJobs.length === 0 ? (
+              <EmptyState
+                icon={WashingMachine}
+                title="Активных стирок нет"
+                description="Запустите цикл выше или нажмите «Стирка» прямо на карточке комнаты."
+              />
+            ) : (
+              <div className="space-y-2.5">
+                {state.laundryJobs.map((job) => (
+                  <LaundryJobCard key={job.id} job={job} onSpeedUp={speedUpLaundry} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Housekeeping Queue */}
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={chargeLaundry}
-                  onChange={(e) => setChargeLaundry(e.target.checked)}
-                  className="w-4 h-4 accent-[#10B981]"
+              <div className="flex items-center gap-2">
+                <Sparkles
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-amber-fg)' }}
                 />
-                Добавить сумму в фолио гостя
-              </label>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-xs font-semibold whitespace-nowrap"
-              >
-                Запустить стирку
-              </button>
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Очередь уборки (Горничные → Админ)
+                </h2>
+              </div>
+              <StatusPill tone={pendingHkTasks.length > 0 ? 'amber' : 'emerald'} mono>
+                Активных: {pendingHkTasks.length}
+              </StatusPill>
             </div>
-          </form>
 
-          <div className="space-y-2.5">
-            {state.laundryJobs.map((job) => (
-              <LaundryJobCard key={job.id} job={job} onSpeedUp={speedUpLaundry} />
-            ))}
-          </div>
-        </section>
-
-        {/* Housekeeping Queue */}
-        <section className="lg:col-span-6 bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#F59E0B]" />
-              <h2 className="text-sm font-semibold text-white">
-                Очередь уборки (Горничные → Админ)
-              </h2>
-            </div>
-            <span className="text-xs font-mono tabular-nums text-slate-400">
-              Активных: {pendingHkTasks.length}
-            </span>
-          </div>
-
-          {pendingHkTasks.length === 0 ? (
-            <div className="p-6 rounded-xl bg-[#0B0F17] border border-white/[0.06] text-center space-y-1">
-              <CheckCircle2 className="w-6 h-6 text-[#10B981] mx-auto" />
-              <p className="text-sm font-medium text-white">Все комнаты убраны и приняты</p>
-              <p className="text-xs text-slate-400">
-                После выселения гостя новая задача появится здесь автоматически
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {pendingHkTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="p-4 rounded-xl bg-[#0B0F17] border border-white/[0.08] space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-semibold text-white">{task.roomLabel}</div>
-                      <p className="text-xs text-slate-400 mt-0.5">{task.notes}</p>
+            {pendingHkTasks.length === 0 ? (
+              <EmptyState
+                icon={CheckCircle2}
+                title="Все комнаты убраны и приняты"
+                description="После выселения гостя новая задача на уборку автоматически появится здесь."
+              />
+            ) : (
+              <div className="space-y-3">
+                {pendingHkTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="p-4 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-[var(--text-primary)]">
+                          {task.roomLabel}
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mt-0.5">{task.notes}</p>
+                      </div>
+                      <StatusPill tone={task.status === 'maid_done' ? 'emerald' : 'amber'}>
+                        {task.status === 'maid_done' ? 'Фото готово' : 'Нужна уборка'}
+                      </StatusPill>
                     </div>
-                    <span
-                      className={`text-xs font-medium shrink-0 ${
-                        task.status === 'maid_done' ? 'text-[#10B981]' : 'text-[#F59E0B]'
-                      }`}
-                    >
-                      {task.status === 'maid_done'
-                        ? 'Горничная: фото прикреплено'
-                        : 'Требуется уборка'}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {task.status === 'dirty' && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {task.status === 'dirty' && (
+                        <button
+                          type="button"
+                          onClick={() => maidMarkCleaned(task.id)}
+                          className="flex-1 py-2 px-3 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] inline-flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Camera
+                            className="w-3.5 h-3.5 shrink-0"
+                            strokeWidth={1.75}
+                            style={{ color: 'var(--tone-cobalt-fg)' }}
+                          />
+                          Горничная: Убрано + фото
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => maidMarkCleaned(task.id)}
-                        className="flex-1 py-2 px-3 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-medium text-white border border-white/[0.08] inline-flex items-center justify-center gap-1.5"
+                        onClick={() => adminApproveHousekeeping(task.id)}
+                        className="flex-1 py-2 px-3 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                       >
-                        <Camera className="w-3.5 h-3.5 text-[#3B82F6]" />
-                        Горничная: Убрано + фото
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                        Принять уборку (→ Свободна)
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => adminApproveHousekeeping(task.id)}
-                      className="flex-1 py-2 px-3 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-xs font-semibold inline-flex items-center justify-center gap-1.5"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Принять уборку (→ Свободна)
-                    </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-      {/* Row 2: Luggage Storage + Airport Transfers */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Luggage Storage */}
-        <section className="lg:col-span-6 bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-[#3B82F6]" />
-              <h2 className="text-sm font-semibold text-white">Камера хранения багажа (#B01+)</h2>
-            </div>
-            <span className="text-xs font-mono tabular-nums text-slate-400">
-              На хранении: {state.luggageItems.filter((l) => l.status === 'stored').length}
-            </span>
-          </div>
-
-          <form onSubmit={handleAddLuggage} className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0B0F17] p-3 rounded-xl border border-white/[0.08]">
-            <input
-              type="text"
-              value={lugGuest}
-              onChange={(e) => setLugGuest(e.target.value)}
-              placeholder="Имя гостя"
-              className="col-span-2 bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-1.5 text-xs text-white"
-            />
-            <input
-              type="number"
-              min="1"
-              value={lugBags}
-              onChange={(e) => setLugBags(e.target.value)}
-              aria-label="Количество сумок"
-              className="bg-[#121826] border border-white/[0.1] rounded-lg px-2.5 py-1.5 font-mono text-xs text-white"
-            />
-            <input
-              type="time"
-              value={lugFlight}
-              onChange={(e) => setLugFlight(e.target.value)}
-              aria-label="Время рейса"
-              className="bg-[#121826] border border-white/[0.1] rounded-lg px-2 py-1.5 font-mono text-xs text-white"
-            />
-            <input
-              type="text"
-              value={lugNotes}
-              onChange={(e) => setLugNotes(e.target.value)}
-              placeholder="Описание (чемодан, рюкзак...)"
-              className="col-span-2 sm:col-span-3 bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-1.5 text-xs text-white"
-            />
-            <button
-              type="submit"
-              className="col-span-2 sm:col-span-1 py-1.5 px-3 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-xs font-semibold"
-            >
-              Выдать бирку
-            </button>
-          </form>
-
-          <div className="space-y-2">
-            {state.luggageItems.map((item) => (
-              <div
-                key={item.id}
-                className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <span className="font-mono text-[#3B82F6]">{item.tagCode}</span>
-                    <span className="truncate">{item.guestName}</span>
-                  </div>
-                  <div className="text-xs text-slate-400 font-mono tabular-nums mt-0.5">
-                    {item.bagsCount} мест · вылет {item.flightTime}
-                    {item.notes ? ` · ${item.notes}` : ''}
-                  </div>
-                </div>
-                {item.status === 'stored' ? (
-                  <button
-                    type="button"
-                    onClick={() => releaseLuggageItem(item.id)}
-                    className="px-3 py-1.5 rounded-lg bg-[#1A2234] hover:bg-[#10B981] hover:text-slate-950 text-xs font-medium text-white border border-white/[0.08] shrink-0 transition-colors"
-                  >
-                    Выдать
-                  </button>
-                ) : (
-                  <span className="text-xs text-[#10B981] shrink-0">Выдан</span>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
+            )}
+          </section>
+        </div>
+      )}
 
-        {/* Airport Transfers */}
-        <section className="lg:col-span-6 bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Plane className="w-4 h-4 text-[#3B82F6]" />
-              <h2 className="text-sm font-semibold text-white">
-                Трансферы (3 км до аэропорта Ташкент)
-              </h2>
+      {/* SUB-TAB 2: Luggage & Airport Transfers */}
+      {servicesSubTab === 'luggage_transfers' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Luggage Storage */}
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Briefcase
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-cobalt-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Камера хранения багажа (#B01+)
+                </h2>
+              </div>
+              <StatusPill tone="cobalt" mono>
+                На хранении: {storedLuggageCount}
+              </StatusPill>
             </div>
-          </div>
 
-          <form onSubmit={handleAddTransfer} className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0B0F17] p-3 rounded-xl border border-white/[0.08]">
-            <input
-              type="text"
-              value={trGuest}
-              onChange={(e) => setTrGuest(e.target.value)}
-              placeholder="Гость"
-              className="col-span-2 bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-1.5 text-xs text-white"
-            />
-            <select
-              value={trDir}
-              onChange={(e) => setTrDir(e.target.value as typeof trDir)}
-              className="bg-[#121826] border border-white/[0.1] rounded-lg px-2 py-1.5 text-xs text-white"
+            <form
+              onSubmit={handleAddLuggage}
+              className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-2xl bg-[var(--bg-elevated)] p-3.5 border border-[var(--border-subtle)]"
             >
-              <option value="to_airport">В аэропорт</option>
-              <option value="from_airport">Из аэропорта</option>
-            </select>
-            <input
-              type="time"
-              value={trTime}
-              onChange={(e) => setTrTime(e.target.value)}
-              className="bg-[#121826] border border-white/[0.1] rounded-lg px-2 py-1.5 font-mono text-xs text-white"
-            />
-            <input
-              type="text"
-              value={trFlight}
-              onChange={(e) => setTrFlight(e.target.value)}
-              placeholder="Рейс (HY-601)"
-              className="bg-[#121826] border border-white/[0.1] rounded-lg px-2.5 py-1.5 font-mono text-xs text-white"
-            />
-            <input
-              type="text"
-              value={trDriver}
-              onChange={(e) => setTrDriver(e.target.value)}
-              placeholder="Водитель / авто"
-              className="col-span-2 bg-[#121826] border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
-            <button
-              type="submit"
-              className="py-1.5 px-3 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-xs font-semibold"
-            >
-              Добавить
-            </button>
-          </form>
-
-          <div className="space-y-2">
-            {state.transfers.map((tr) => {
-              const st = TRANSFER_STATUS_LABEL[tr.status];
-              return (
-                <div
-                  key={tr.id}
-                  className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] flex flex-wrap items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-white">
-                      {tr.pickupTime} · {tr.guestName}{' '}
-                      <span className="text-xs font-normal text-slate-400">
-                        ({tr.direction === 'to_airport' ? 'В аэропорт' : 'Встреча'})
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-400 font-mono tabular-nums mt-0.5">
-                      Рейс {tr.flightNumber} · {tr.driverName} · ${tr.priceUsd}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => cycleTransferStatus(tr.id)}
-                    className={`px-3 py-1.5 rounded-lg bg-[#1A2234] hover:bg-slate-700 border border-white/[0.08] text-xs font-semibold ${st.color}`}
-                  >
-                    {st.text} →
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      {/* Row 3: Interactive Guest QR Concierge Phone + Stock & Emergency Directory */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Interactive Guest QR Concierge Phone (RU / EN / UZ / ZH) */}
-        <section className="lg:col-span-5 bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <QrCode className="w-4 h-4 text-[#10B981]" />
-              <h2 className="text-sm font-semibold text-white">
-                Гостевой QR-консьерж (интерактив)
-              </h2>
-            </div>
-            <div className="flex items-center gap-1 p-0.5 bg-[#0B0F17] border border-white/[0.08] rounded-lg">
-              {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  onClick={() => setQrLang(l)}
-                  className={`px-2 py-1 rounded-md text-xs font-mono uppercase transition-colors ${
-                    qrLang === l ? 'bg-[#3B82F6] text-white font-semibold' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="flex-1 min-w-[180px]">
-              <label className="block text-xs text-slate-400 mb-1">
-                От имени какого гостя тестируем QR:
-              </label>
-              <select
-                value={selectedQrBooking?.id ?? ''}
-                onChange={(e) => setQrBookingId(e.target.value)}
-                className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
+              <input
+                type="text"
+                value={lugGuest}
+                onChange={(e) => setLugGuest(e.target.value)}
+                placeholder="Имя гостя"
+                className="ops-input col-span-2 px-3 py-2 text-xs"
+              />
+              <input
+                type="number"
+                min="1"
+                value={lugBags}
+                onChange={(e) => setLugBags(e.target.value)}
+                aria-label="Количество сумок"
+                className="ops-input px-2.5 py-2 font-mono tabular-nums text-xs"
+              />
+              <input
+                type="time"
+                value={lugFlight}
+                onChange={(e) => setLugFlight(e.target.value)}
+                aria-label="Время рейса"
+                className="ops-input px-2 py-2 font-mono tabular-nums text-xs"
+              />
+              <input
+                type="text"
+                value={lugNotes}
+                onChange={(e) => setLugNotes(e.target.value)}
+                placeholder="Описание (чемодан, рюкзак...)"
+                className="ops-input col-span-2 sm:col-span-3 px-3 py-2 text-xs"
+              />
+              <button
+                type="submit"
+                className="col-span-2 sm:col-span-1 py-2 px-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors"
               >
-                {activeBookings.map((b) => {
-                  const rm = state.physicalRooms.find(
-                    (r) => r.id === b.segments[b.segments.length - 1]?.roomId
-                  );
+                Выдать бирку
+              </button>
+            </form>
+
+            {state.luggageItems.length === 0 ? (
+              <EmptyState
+                icon={Briefcase}
+                title="Камера хранения пуста"
+                description="Добавьте багаж здесь или при выселении гостя в окне Check-out."
+              />
+            ) : (
+              <div className="space-y-2.5">
+                {state.luggageItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+                        <span
+                          className="font-mono"
+                          style={{ color: 'var(--tone-cobalt-fg)' }}
+                        >
+                          {item.tagCode}
+                        </span>
+                        <span className="truncate">{item.guestName}</span>
+                      </div>
+                      <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums mt-0.5">
+                        {item.bagsCount} мест · вылет {item.flightTime}
+                        {item.notes ? ` · ${item.notes}` : ''}
+                      </div>
+                    </div>
+                    {item.status === 'stored' ? (
+                      <button
+                        type="button"
+                        onClick={() => releaseLuggageItem(item.id)}
+                        className="px-3.5 py-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[#059669] hover:text-white text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] shrink-0 transition-colors"
+                      >
+                        Выдать
+                      </button>
+                    ) : (
+                      <StatusPill tone="emerald">Выдан</StatusPill>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Airport Transfers */}
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Plane
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-cobalt-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Трансферы (3 км до аэропорта Ташкент)
+                </h2>
+              </div>
+              <StatusPill tone="neutral" mono>
+                {state.transfers.length}
+              </StatusPill>
+            </div>
+
+            <form
+              onSubmit={handleAddTransfer}
+              className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-2xl bg-[var(--bg-elevated)] p-3.5 border border-[var(--border-subtle)]"
+            >
+              <input
+                type="text"
+                value={trGuest}
+                onChange={(e) => setTrGuest(e.target.value)}
+                placeholder="Имя гостя"
+                className="ops-input col-span-2 px-3 py-2 text-xs"
+              />
+              <select
+                value={trDir}
+                onChange={(e) => setTrDir(e.target.value as typeof trDir)}
+                className="ops-input px-2.5 py-2 text-xs"
+              >
+                <option value="to_airport">В аэропорт</option>
+                <option value="from_airport">Из аэропорта</option>
+              </select>
+              <input
+                type="time"
+                value={trTime}
+                onChange={(e) => setTrTime(e.target.value)}
+                className="ops-input px-2 py-2 font-mono tabular-nums text-xs"
+              />
+              <input
+                type="text"
+                value={trFlight}
+                onChange={(e) => setTrFlight(e.target.value)}
+                placeholder="Рейс (HY-601)"
+                className="ops-input px-2.5 py-2 font-mono text-xs"
+              />
+              <input
+                type="text"
+                value={trDriver}
+                onChange={(e) => setTrDriver(e.target.value)}
+                placeholder="Водитель / авто"
+                className="ops-input col-span-2 px-2.5 py-2 text-xs"
+              />
+              <button
+                type="submit"
+                className="py-2 px-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors"
+              >
+                Добавить
+              </button>
+            </form>
+
+            {state.transfers.length === 0 ? (
+              <EmptyState
+                icon={Plane}
+                title="Трансферов пока нет"
+                description="Добавьте заказ трансфера до аэропорта или встречу гостя по номеру рейса."
+              />
+            ) : (
+              <div className="space-y-2.5">
+                {state.transfers.map((tr) => {
+                  const meta = TRANSFER_STATUS_META[tr.status];
                   return (
-                    <option key={b.id} value={b.id}>
-                      {rm?.code} · {b.guests[0]?.fullName}
-                    </option>
+                    <div
+                      key={tr.id}
+                      className="p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-[var(--text-primary)]">
+                          <span className="font-mono tabular-nums">{tr.pickupTime}</span> ·{' '}
+                          {tr.guestName}{' '}
+                          <span className="text-xs font-normal text-[var(--text-muted)]">
+                            ({tr.direction === 'to_airport' ? 'В аэропорт' : 'Встреча'})
+                          </span>
+                        </div>
+                        <div className="text-xs text-[var(--text-muted)] font-mono tabular-nums mt-0.5">
+                          Рейс {tr.flightNumber} · {tr.driverName} · ${tr.priceUsd}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => cycleTransferStatus(tr.id)}
+                        className="inline-flex items-center gap-1 transition-opacity hover:opacity-85"
+                        title="Нажмите, чтобы переключить статус трансфера"
+                      >
+                        <StatusPill tone={meta.tone}>{meta.text} →</StatusPill>
+                      </button>
+                    </div>
                   );
                 })}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const roomId =
-                  selectedQrBooking?.segments[selectedQrBooking.segments.length - 1]?.roomId ??
-                  state.physicalRooms[0]?.id;
-                openQrPosterModal(roomId);
-              }}
-              className="px-3 py-2 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-semibold text-white border border-white/[0.08] inline-flex items-center gap-1.5 whitespace-nowrap"
-            >
-              <Printer className="w-3.5 h-3.5 text-[#10B981]" />
-              Печать QR-постера
-            </button>
-          </div>
-
-          {/* Mobile Phone Frame */}
-          <div className="mx-auto max-w-[320px] bg-[#0B0F17] border-2 border-slate-700/80 rounded-[28px] p-4 space-y-3.5 shadow-xl">
-            <div className="w-16 h-1 bg-slate-700 rounded-full mx-auto" />
-            <div className="space-y-1">
-              <div className="text-xs font-mono text-[#10B981]">TOPCHAN HOSTEL · TASHKENT</div>
-              <h3 className="text-base font-bold text-white leading-snug">{qrCopy.welcome}</h3>
-              <p className="text-xs text-slate-400">{qrCopy.subtitle}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-[#121826] border border-white/[0.08] text-xs font-mono">
-              <div>
-                <div className="text-slate-400 flex items-center gap-1">
-                  <Wifi className="w-3 h-3 text-[#3B82F6]" />
-                  {qrCopy.wifiLabel}
-                </div>
-                <div className="text-white font-semibold mt-0.5">{state.integrations.wifiPass}</div>
               </div>
-              <div>
-                <div className="text-slate-400">{qrCopy.doorLabel}</div>
-                <div className="text-white font-semibold mt-0.5">{state.integrations.doorCode}</div>
-              </div>
-            </div>
+            )}
+          </section>
+        </div>
+      )}
 
-            <p className="text-xs text-slate-400 leading-relaxed">{qrCopy.breakfastNote}</p>
-
-            <div className="space-y-2">
-              {[
-                { key: 'extend' as const, label: qrCopy.extendBtn, accent: 'bg-[#10B981] text-slate-950 hover:bg-emerald-600' },
-                { key: 'laundry_fast' as const, label: qrCopy.laundryFastBtn, accent: 'bg-[#1A2234] text-white hover:bg-slate-700 border border-white/[0.08]' },
-                { key: 'laundry_medium' as const, label: qrCopy.laundryMedBtn, accent: 'bg-[#1A2234] text-white hover:bg-slate-700 border border-white/[0.08]' },
-                { key: 'transfer' as const, label: qrCopy.transferBtn, accent: 'bg-[#1A2234] text-white hover:bg-slate-700 border border-white/[0.08]' },
-                { key: 'late_breakfast' as const, label: qrCopy.lateBreakfastBtn, accent: 'bg-[#1A2234] text-white hover:bg-slate-700 border border-white/[0.08]' },
-              ].map((btn) => (
-                <button
-                  key={btn.key}
-                  type="button"
-                  disabled={!selectedQrBooking}
-                  onClick={() =>
-                    selectedQrBooking &&
-                    submitGuestQrRequest({
-                      bookingId: selectedQrBooking.id,
-                      serviceType: btn.key,
-                      lang: qrLang,
-                    })
-                  }
-                  className={`w-full py-2.5 px-3 rounded-xl text-xs font-semibold transition-colors ${btn.accent}`}
-                >
-                  {btn.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Stock & Emergency Contacts */}
-        <section className="lg:col-span-7 space-y-5">
+      {/* SUB-TAB 3: Stock, Review Templates & Emergency Contacts */}
+      {servicesSubTab === 'stock_contacts' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Consumables Stock */}
-          <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <Package className="w-4 h-4 text-[#F59E0B]" />
-              <h2 className="text-sm font-semibold text-white">Запасы и расходники хостела</h2>
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Package
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-amber-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Запасы и расходники хостела
+                </h2>
+              </div>
+              {lowStockCount > 0 && (
+                <StatusPill tone="rose" icon={AlertTriangle}>
+                  Пополнить: {lowStockCount}
+                </StatusPill>
+              )}
             </div>
-            <div className="divide-y divide-white/[0.06] border border-white/[0.08] rounded-xl bg-[#0B0F17] overflow-hidden">
+
+            <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-2xl bg-[var(--bg-elevated)] overflow-hidden">
               {state.stockItems.map((item) => {
                 const isLow = item.quantity <= item.minThreshold;
                 return (
@@ -746,15 +800,20 @@ export const ServicesTab: React.FC = () => {
                     className="px-4 py-3 flex items-center justify-between gap-3"
                   >
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-white truncate">{item.name}</div>
+                      <div className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                        {item.name}
+                      </div>
                       <div className="text-xs flex items-center gap-1.5 mt-0.5">
                         {isLow ? (
-                          <span className="text-[#F43F5E] inline-flex items-center gap-1 font-medium">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                          <span
+                            className="inline-flex items-center gap-1 font-semibold"
+                            style={{ color: 'var(--tone-rose-fg)' }}
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.75} />
                             Низкий остаток (порог {item.minThreshold})
                           </span>
                         ) : (
-                          <span className="text-slate-400">
+                          <span className="text-[var(--text-muted)]">
                             Норма (минимум {item.minThreshold} {item.unit})
                           </span>
                         )}
@@ -765,14 +824,15 @@ export const ServicesTab: React.FC = () => {
                         type="button"
                         aria-label={`Списать 1 ${item.name}`}
                         onClick={() => adjustStock(item.id, -1)}
-                        className="p-1.5 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-slate-200 border border-white/[0.08]"
+                        className="w-8 h-8 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-subtle)] flex items-center justify-center transition-colors"
                       >
-                        <Minus className="w-3.5 h-3.5" />
+                        <Minus className="w-3.5 h-3.5" strokeWidth={1.75} />
                       </button>
                       <span
-                        className={`w-12 text-center font-mono tabular-nums text-sm font-bold ${
-                          isLow ? 'text-[#F43F5E]' : 'text-white'
-                        }`}
+                        className="w-12 text-center font-mono tabular-nums text-sm font-bold"
+                        style={{
+                          color: isLow ? 'var(--tone-rose-fg)' : 'var(--text-primary)',
+                        }}
                       >
                         {item.quantity}
                       </span>
@@ -780,123 +840,271 @@ export const ServicesTab: React.FC = () => {
                         type="button"
                         aria-label={`Добавить 5 ${item.name}`}
                         onClick={() => adjustStock(item.id, 5)}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-mono text-[#10B981] border border-white/[0.08] inline-flex items-center gap-1"
+                        className="h-8 px-2.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-mono font-bold border border-[var(--border-subtle)] inline-flex items-center gap-1 transition-colors"
+                        style={{ color: 'var(--tone-emerald-fg)' }}
                       >
-                        <Plus className="w-3 h-3" />5
+                        <Plus className="w-3 h-3" strokeWidth={2} />5
                       </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </section>
 
-          {/* 2-Stage Post-Checkout Review Booster */}
-          <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Right column: Review Booster + Emergency Directory */}
+          <div className="lg:col-span-6 space-y-5">
+            {/* Review Booster */}
+            <section className="ops-card p-5 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Star
+                    className="w-4 h-4 shrink-0"
+                    strokeWidth={1.75}
+                    style={{ color: 'var(--tone-amber-fg)' }}
+                  />
+                  <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                    Запрос отзыва после выезда
+                  </h2>
+                </div>
+                <SegmentedControl
+                  options={LANG_OPTIONS}
+                  value={reviewLang}
+                  onChange={setReviewLang}
+                  layoutId="servicesReviewLang"
+                  ariaLabel="Язык шаблона отзыва"
+                  size="sm"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Гость для запроса отзыва"
+                  value={reviewBookingId}
+                  onChange={(e) => setReviewBookingId(e.target.value)}
+                  className="ops-input flex-1 min-w-[180px] px-3 py-2 text-xs"
+                >
+                  {state.bookings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.guests[0]?.fullName ?? 'Гость'} (
+                      {b.status === 'checked_out' ? 'Выехал' : 'Проживает'})
+                    </option>
+                  ))}
+                </select>
+                <CopyButton
+                  text={reviewMessageText}
+                  label="Копировать"
+                  variant="primary"
+                  onCopied={() =>
+                    pushToast(
+                      'Запрос отзыва скопирован',
+                      `Готово для WhatsApp / Telegram (${reviewLang.toUpperCase()})`,
+                      'emerald'
+                    )
+                  }
+                />
+              </div>
+
+              <pre className="p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] whitespace-pre-wrap font-sans leading-relaxed">
+                {reviewMessageText}
+              </pre>
+            </section>
+
+            {/* Emergency Contacts */}
+            <section className="ops-card p-5 space-y-3.5">
               <div className="flex items-center gap-2">
-                <Star className="w-4 h-4 text-[#F59E0B]" />
-                <h2 className="text-sm font-semibold text-white">
-                  2-ступенчатый Review Booster (Google / Booking)
+                <Phone
+                  className="w-4 h-4 shrink-0"
+                  strokeWidth={1.75}
+                  style={{ color: 'var(--tone-emerald-fg)' }}
+                />
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Экстренные контакты и службы (Ташкент)
                 </h2>
               </div>
-              <div className="flex items-center gap-1 p-0.5 bg-[#0B0F17] border border-white/[0.08] rounded-lg">
-                {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((l) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {state.emergencyContacts.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <StatusPill tone="cobalt">{c.category}</StatusPill>
+                      <CopyButton
+                        text={c.phone}
+                        label={c.phone}
+                        size="sm"
+                        variant="ghost"
+                        onCopied={() =>
+                          pushToast('Номер скопирован', `${c.name} · ${c.phone}`, 'emerald')
+                        }
+                      />
+                    </div>
+                    <div className="text-sm font-semibold text-[var(--text-primary)]">
+                      {c.name}{' '}
+                      <span className="font-normal text-[var(--text-muted)]">· {c.role}</span>
+                    </div>
+                    <p className="text-xs text-[var(--text-secondary)]">{c.note}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 4: Interactive Guest QR Concierge */}
+      {servicesSubTab === 'qr_guide' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          {/* Controls & Explanation */}
+          <section className="lg:col-span-6 ops-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <QrCode
+                className="w-4 h-4 shrink-0"
+                strokeWidth={1.75}
+                style={{ color: 'var(--tone-emerald-fg)' }}
+              />
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                Настройка и тест гостевого QR-консьержа
+              </h2>
+            </div>
+
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Гость сканирует QR-код в комнате, видит пароль Wi-Fi, код двери и отправляет заявки
+              прямо в ленту Telegram-бота ресепшна на своём языке (RU / EN / UZ / 中文).
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-[var(--text-muted)] mb-1.5">
+                  Язык интерфейса гостя
+                </label>
+                <SegmentedControl
+                  options={LANG_OPTIONS}
+                  value={qrLang}
+                  onChange={setQrLang}
+                  layoutId="servicesQrLang"
+                  ariaLabel="Язык QR-консьержа"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-[var(--text-muted)] mb-1.5">
+                  От имени какого гостя протестировать заявку
+                </label>
+                <select
+                  value={selectedQrBooking?.id ?? ''}
+                  onChange={(e) => setQrBookingId(e.target.value)}
+                  className="ops-input w-full px-3 py-2.5 text-xs"
+                >
+                  {activeBookings.map((b) => {
+                    const rm = state.physicalRooms.find(
+                      (r) => r.id === b.segments[b.segments.length - 1]?.roomId
+                    );
+                    return (
+                      <option key={b.id} value={b.id}>
+                        {rm?.code} · {b.guests[0]?.fullName}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const roomId =
+                    selectedQrBooking?.segments[selectedQrBooking.segments.length - 1]?.roomId ??
+                    state.physicalRooms[0]?.id;
+                  openQrPosterModal(roomId);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-xs font-semibold inline-flex items-center gap-2 transition-colors"
+              >
+                <Printer className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                Распечатать QR-постер (A5 / A4)
+              </button>
+            </div>
+          </section>
+
+          {/* Clean Phone Mockup Frame */}
+          <section className="lg:col-span-6 ops-card p-6 flex justify-center">
+            <div className="w-full max-w-[332px] bg-[var(--bg-canvas)] border-2 border-[var(--border-strong)] rounded-[32px] p-4 space-y-4 shadow-xl">
+              <div className="w-16 h-1.5 bg-[var(--border-strong)] rounded-full mx-auto" />
+              <div className="space-y-1">
+                <div
+                  className="text-xs font-mono font-semibold"
+                  style={{ color: 'var(--tone-emerald-fg)' }}
+                >
+                  TOPCHAN HOSTEL · TASHKENT
+                </div>
+                <h3 className="text-base font-bold text-[var(--text-primary)] leading-snug">
+                  {qrCopy.welcome}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">{qrCopy.subtitle}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs font-mono">
+                <div>
+                  <div className="text-[var(--text-muted)] flex items-center gap-1">
+                    <Wifi
+                      className="w-3.5 h-3.5 shrink-0"
+                      strokeWidth={1.75}
+                      style={{ color: 'var(--tone-cobalt-fg)' }}
+                    />
+                    {qrCopy.wifiLabel}
+                  </div>
+                  <div className="text-[var(--text-primary)] font-bold mt-0.5">
+                    {state.integrations.wifiPass}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[var(--text-muted)]">{qrCopy.doorLabel}</div>
+                  <div className="text-[var(--text-primary)] font-bold mt-0.5">
+                    {state.integrations.doorCode}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                {qrCopy.breakfastNote}
+              </p>
+
+              <div className="space-y-2">
+                {[
+                  { key: 'extend' as const, label: qrCopy.extendBtn, primary: true },
+                  { key: 'laundry_fast' as const, label: qrCopy.laundryFastBtn, primary: false },
+                  { key: 'laundry_medium' as const, label: qrCopy.laundryMedBtn, primary: false },
+                  { key: 'transfer' as const, label: qrCopy.transferBtn, primary: false },
+                  { key: 'late_breakfast' as const, label: qrCopy.lateBreakfastBtn, primary: false },
+                ].map((btn) => (
                   <button
-                    key={l}
+                    key={btn.key}
                     type="button"
-                    onClick={() => setReviewLang(l)}
-                    className={`px-2 py-0.5 rounded-md text-xs font-mono uppercase transition-colors ${
-                      reviewLang === l
-                        ? 'bg-[#F59E0B] text-slate-950 font-semibold'
-                        : 'text-slate-400 hover:text-white'
+                    disabled={!selectedQrBooking}
+                    onClick={() =>
+                      selectedQrBooking &&
+                      submitGuestQrRequest({
+                        bookingId: selectedQrBooking.id,
+                        serviceType: btn.key,
+                        lang: qrLang,
+                      })
+                    }
+                    className={`w-full py-2.5 px-3 rounded-xl text-xs font-semibold transition-colors ${
+                      btn.primary
+                        ? 'bg-[#059669] hover:bg-[#047857] text-white'
+                        : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-subtle)]'
                     }`}
                   >
-                    {l}
+                    {btn.label}
                   </button>
                 ))}
               </div>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Гость для запроса отзыва"
-                value={reviewBookingId}
-                onChange={(e) => setReviewBookingId(e.target.value)}
-                className="flex-1 min-w-[200px] bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
-              >
-                {state.bookings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.guests[0]?.fullName ?? 'Гость'} ({b.status === 'checked_out' ? 'Выехал' : 'Проживает'})
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  const target =
-                    state.bookings.find((b) => b.id === reviewBookingId) ?? state.bookings[0];
-                  const name = target?.guests[0]?.fullName ?? 'Гость';
-                  const msg = REVIEW_TEMPLATES[reviewLang](name);
-                  navigator.clipboard?.writeText(msg).catch(() => {});
-                  pushToast(
-                    'Запрос отзыва скопирован',
-                    `Готово для WhatsApp / Telegram (${reviewLang.toUpperCase()})`,
-                    'emerald'
-                  );
-                }}
-                className="px-3.5 py-2 rounded-lg bg-[#10B981] hover:bg-emerald-600 text-slate-950 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                Копировать для WhatsApp / TG
-              </button>
-            </div>
-
-            <pre className="p-3 rounded-xl bg-[#0B0F17] border border-white/[0.08] text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">
-              {REVIEW_TEMPLATES[reviewLang](
-                (state.bookings.find((b) => b.id === reviewBookingId) ?? state.bookings[0])
-                  ?.guests[0]?.fullName ?? 'Гость'
-              )}
-            </pre>
-          </div>
-
-          {/* Emergency Contacts */}
-          <div className="bg-[#121826] border border-white/[0.08] rounded-2xl p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <Phone className="w-4 h-4 text-[#10B981]" />
-              <h2 className="text-sm font-semibold text-white">
-                Экстренные контакты и службы (Ташкент)
-              </h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {state.emergencyContacts.map((c) => (
-                <div
-                  key={c.id}
-                  className="p-3.5 rounded-xl bg-[#0B0F17] border border-white/[0.08] space-y-1.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-[#3B82F6] font-medium">{c.category}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(c.phone).catch(() => {});
-                        pushToast('Номер скопирован', `${c.name} · ${c.phone}`, 'emerald');
-                      }}
-                      className="font-mono tabular-nums text-xs text-[#10B981] hover:underline"
-                    >
-                      {c.phone}
-                    </button>
-                  </div>
-                  <div className="text-sm font-semibold text-white">
-                    {c.name} · <span className="font-normal text-slate-300">{c.role}</span>
-                  </div>
-                  <p className="text-xs text-slate-400">{c.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

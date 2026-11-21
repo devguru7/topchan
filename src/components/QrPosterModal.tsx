@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Copy, ExternalLink, KeyRound, Printer, QrCode, Wifi, X } from 'lucide-react';
+import { ExternalLink, KeyRound, Printer, QrCode, Wifi, X } from 'lucide-react';
 import { useOpsData, useUI } from '../context/OpsContext';
+import { CopyButton } from './ui';
 
 /**
  * Pure TypeScript deterministic QR-matrix generator (29x29 Version 3 geometry)
  * with authentic finder patterns, separators, timing patterns, alignment marker,
- * and SHA-like FNV-1a bit-stream encoding of the room URL.
- * Zero external dependencies — renders crisp vector SVG suitable for A5/A4 printing.
+ * and FNV-1a bit-stream encoding of the room URL.
  */
 function buildQrMatrix(payload: string): boolean[][] {
   const size = 29;
@@ -42,7 +42,6 @@ function buildQrMatrix(payload: string): boolean[][] {
   placeFinder(0, size - 7);
   placeFinder(size - 7, 0);
 
-  // Alignment pattern at (20, 20) for 29x29 QR
   for (let r = -2; r <= 2; r += 1) {
     for (let c = -2; c <= 2; c += 1) {
       const dist = Math.max(Math.abs(r), Math.abs(c));
@@ -50,16 +49,13 @@ function buildQrMatrix(payload: string): boolean[][] {
     }
   }
 
-  // Timing patterns
   for (let i = 8; i < size - 8; i += 1) {
     if (grid[6][i] === null) grid[6][i] = i % 2 === 0;
     if (grid[i][6] === null) grid[i][6] = i % 2 === 0;
   }
 
-  // Dark module
   grid[size - 8][8] = true;
 
-  // Deterministic bit stream from UTF-8 bytes + FNV-1a mixer
   const bytes = Array.from(new TextEncoder().encode(payload));
   let h1 = 2166136261;
   let h2 = 3735928559;
@@ -130,7 +126,7 @@ export const QrSvg: React.FC<{ value: string; sizePx?: number }> = ({ value, siz
               y={r + quiet}
               width={1}
               height={1}
-              fill="#0B0F17"
+              fill="#090C12"
             />
           ) : null
         )
@@ -162,11 +158,6 @@ export const QrPosterModal: React.FC = () => {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://topchan.uz';
   const guestUrl = `${origin}/?mode=guest&room=${encodeURIComponent(roomSlug)}`;
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(guestUrl).catch(() => {});
-    pushToast('Ссылка QR-консьержа скопирована', guestUrl, 'cobalt');
-  };
-
   const handlePrintPoster = () => {
     document.body.dataset.printTarget = 'qr-poster';
     window.print();
@@ -176,22 +167,33 @@ export const QrPosterModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm print:static print:bg-white print:p-0">
+    <div
+      style={{ backgroundColor: 'var(--backdrop-scrim)' }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-xs print:static print:bg-white print:p-0"
+      onClick={closeQrPosterModal}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-white/10 bg-[#121826] shadow-2xl print:max-w-none print:rounded-none print:border-0 print:bg-white print:shadow-none"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Печать QR-постера для комнаты"
+        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-xl print:max-w-none print:rounded-none print:border-0 print:bg-white print:shadow-none"
       >
         {/* Modal Header (hidden in print) */}
-        <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-4 print:hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4 print:hidden">
           <div className="flex items-center gap-2.5">
-            <QrCode className="h-5 w-5 text-emerald-400" />
+            <QrCode
+              className="h-5 w-5"
+              strokeWidth={1.75}
+              style={{ color: 'var(--tone-emerald-fg)' }}
+            />
             <div>
-              <h2 className="text-base font-bold text-slate-50">
+              <h2 className="text-base font-bold text-[var(--text-primary)]">
                 Печать QR-постера для комнаты (A5 / ламинация)
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[var(--text-muted)]">
                 Повесьте на дверь номера: гость сканирует QR и заказывает стирку, продление или трансфер
               </p>
             </div>
@@ -199,20 +201,20 @@ export const QrPosterModal: React.FC = () => {
           <button
             type="button"
             onClick={closeQrPosterModal}
-            className="rounded-lg border border-white/10 bg-[#1A2234] p-2 text-slate-300 hover:bg-white/10"
+            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             aria-label="Закрыть"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" strokeWidth={1.75} />
           </button>
         </div>
 
         {/* Room Picker (hidden in print) */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.08] bg-[#0B0F17]/60 px-5 py-3 print:hidden">
-          <span className="text-xs font-medium text-slate-400">Комната:</span>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-3 print:hidden">
+          <span className="text-xs font-medium text-[var(--text-muted)]">Комната:</span>
           <select
             value={selectedRoom?.id ?? ''}
             onChange={(e) => setSelectedRoomId(e.target.value)}
-            className="rounded-lg border border-white/10 bg-[#121826] px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-500/50"
+            className="ops-input px-3 py-1.5 text-sm"
           >
             {activeRooms.map((r) => (
               <option key={r.id} value={r.id}>
@@ -222,38 +224,40 @@ export const QrPosterModal: React.FC = () => {
           </select>
 
           <div className="ml-auto flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleCopyLink}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#1A2234] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              Скопировать URL
-            </button>
+            <CopyButton
+              text={guestUrl}
+              label="Ссылка гостя"
+              onCopied={() => pushToast('Ссылка QR-гида скопирована', guestUrl, 'cobalt')}
+            />
             <a
               href={`/?mode=guest&room=${encodeURIComponent(roomSlug)}`}
-              className="flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/15 px-3 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-500/25"
+              className="flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors"
+              style={{
+                backgroundColor: 'var(--tone-cobalt-bg)',
+                borderColor: 'var(--tone-cobalt-border)',
+                color: 'var(--tone-cobalt-fg)',
+              }}
             >
-              <ExternalLink className="h-3.5 w-3.5" />
+              <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
               Открыть как гость
             </a>
             <button
               type="button"
               onClick={handlePrintPoster}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-slate-950 hover:bg-emerald-400"
+              className="flex items-center gap-1.5 rounded-xl bg-[#059669] hover:bg-[#047857] px-3.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap transition-colors"
             >
-              <Printer className="h-3.5 w-3.5" />
+              <Printer className="h-3.5 w-3.5" strokeWidth={1.75} />
               Печать постера
             </button>
           </div>
         </div>
 
-        {/* Printable Laminated Poster Sheet */}
+        {/* Printable Laminated Poster Sheet (Always crisp black-on-white) */}
         <div className="p-6 print:p-8" id="printable-qr-poster">
-          <div className="mx-auto max-w-md rounded-2xl border-2 border-slate-200 bg-white p-6 text-slate-900 shadow-lg print:max-w-lg print:border-slate-900 print:shadow-none">
+          <div className="mx-auto max-w-md rounded-2xl border-2 border-slate-200 bg-white p-6 text-slate-900 print:max-w-lg print:border-slate-900">
             <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-4">
               <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-widest text-emerald-700 truncate">
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 truncate">
                   {state.integrations.propertyName}
                   {/tashkent|ташкент/i.test(state.integrations.propertyName) ? '' : ' · Tashkent'}
                 </p>
@@ -280,7 +284,7 @@ export const QrPosterModal: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-100 p-3.5 text-xs">
               <div className="flex items-start gap-2">
-                <Wifi className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                <Wifi className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" strokeWidth={1.75} />
                 <div>
                   <p className="font-semibold text-slate-500">Wi-Fi</p>
                   <p className="font-bold text-slate-900">{state.integrations.wifiSsid}</p>
@@ -288,18 +292,18 @@ export const QrPosterModal: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" strokeWidth={1.75} />
                 <div>
                   <p className="font-semibold text-slate-500">Код двери / Door</p>
                   <p className="font-mono text-base font-extrabold text-slate-950">
                     {state.integrations.doorCode}
                   </p>
-                  <p className="text-slate-600">Check-out 12:00</p>
+                  <p className="text-slate-600">Выезд 12:00</p>
                 </div>
               </div>
             </div>
 
-            <p className="mt-4 text-center font-mono text-[11px] text-slate-500 break-all">
+            <p className="mt-4 text-center font-mono text-xs text-slate-500 break-all">
               {guestUrl}
             </p>
           </div>

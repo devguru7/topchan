@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   Camera,
   CheckSquare,
-  Copy,
-  FileText,
   Loader2,
   ScanLine,
   ShieldCheck,
@@ -26,6 +26,13 @@ import {
 import { addDaysIso, getTashkentTodayIso } from '../../utils/time';
 import { findAlternativeFreeRooms, findRoomConflicts } from '../../utils/availability';
 import { extractPassportMrzFromPhoto } from '../../services/aiService';
+import { CopyButton, StatusPill, StepProgress, TooltipHint } from '../ui';
+
+const WIZARD_STEPS = [
+  { id: 1, label: 'Гость и паспорт', hint: 'MRZ или вручную' },
+  { id: 2, label: 'Комната и оплата', hint: 'Даты, тариф, касса' },
+  { id: 3, label: 'Проверка правил', hint: 'E-mehmon и выдача ключа' },
+] as const;
 
 export const CheckInModal: React.FC = () => {
   const {
@@ -38,6 +45,7 @@ export const CheckInModal: React.FC = () => {
 
   const isOpen = checkInPreselect !== null;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
 
   const allRoomOptions = useMemo(() => {
     const items: Array<{
@@ -101,7 +109,7 @@ export const CheckInModal: React.FC = () => {
   const [payPocket, setPayPocket] = useState<CashPocketId>('cash_usd');
   const [payAmount, setPayAmount] = useState(36);
 
-  // Mandatory reception checklist
+  // Mandatory reception checklist (individual manual confirmation required)
   const [chkOriginalPassport, setChkOriginalPassport] = useState(false);
   const [chkVisaChecked, setChkVisaChecked] = useState(false);
   const [chkBnovoPaid, setChkBnovoPaid] = useState(false);
@@ -110,6 +118,7 @@ export const CheckInModal: React.FC = () => {
 
   useEffect(() => {
     if (!isOpen) return;
+    setStep(1);
     const preKey = checkInPreselect?.bedId
       ? `${checkInPreselect.roomId}:${checkInPreselect.bedId}`
       : checkInPreselect?.roomId ?? '';
@@ -124,6 +133,9 @@ export const CheckInModal: React.FC = () => {
     }
     setFromDate(checkInPreselect?.fromDate || getTashkentTodayIso());
     setNights(2);
+    setPayNow(true);
+    setPayPocket('cash_usd');
+    setPayCurrency('USD');
     setMrzInput('');
     setOcrNote(null);
     setFullName('');
@@ -137,14 +149,6 @@ export const CheckInModal: React.FC = () => {
     setChkEmehmonDone(false);
     setChkTourDone(false);
   }, [isOpen, checkInPreselect, allRoomOptions]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) closeCheckInModal();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, closeCheckInModal]);
 
   const mrzParsed = useMemo(() => {
     if (!mrzInput.trim()) return null;
@@ -194,7 +198,7 @@ export const CheckInModal: React.FC = () => {
         setOcrNote(result.note);
       } else {
         setOcrNote(result.note);
-        pushToast('OCR-подсказка', result.note, 'amber');
+        pushToast('Подсказка сканера', result.note, 'amber');
       }
     } catch {
       pushToast('Не удалось прочитать файл', 'Попробуйте вставить 2 строки MRZ вручную', 'rose');
@@ -206,7 +210,6 @@ export const CheckInModal: React.FC = () => {
   const selectedOption = allRoomOptions.find((o) => o.key === selectedKey);
   const toDate = addDaysIso(fromDate, Math.max(1, nights));
 
-  // Real-time Overbooking Conflict Check + Alternative Suggestions
   const conflicts = useMemo(() => {
     if (!selectedOption) return [];
     return findRoomConflicts(
@@ -267,34 +270,79 @@ export const CheckInModal: React.FC = () => {
   const previewTouristTaxUzs = dailyTaxUzs * Math.max(1, nights);
   const taxRatePct = activePhysicalCount <= 10 ? 5 : 10;
 
-  const allChecked =
-    chkOriginalPassport && chkVisaChecked && chkBnovoPaid && chkEmehmonDone && chkTourDone;
-  const canSubmit = Boolean(
-    selectedOption &&
-      conflicts.length === 0 &&
-      fullName.trim().length >= 2 &&
-      passportNo.trim().length >= 4 &&
-      allChecked
+  const checklistItems = [
+    {
+      id: 'passport',
+      checked: chkOriginalPassport,
+      set: setChkOriginalPassport,
+      label: 'Оригинал паспорта/ID проверен (никаких фото и сканов)',
+    },
+    {
+      id: 'visa',
+      checked: chkVisaChecked,
+      set: setChkVisaChecked,
+      label: 'Виза / регистрация и срок пребывания проверены',
+    },
+    {
+      id: 'bnovo',
+      checked: chkBnovoPaid,
+      set: setChkBnovoPaid,
+      label: 'Оплата и заезд отмечены в Bnovo',
+    },
+    {
+      id: 'emehmon',
+      checked: chkEmehmonDone,
+      set: setChkEmehmonDone,
+      label: 'Регистрация в E-mehmon оформлена',
+    },
+    {
+      id: 'tour',
+      checked: chkTourDone,
+      set: setChkTourDone,
+      label: 'Хостел показан (кухня до 00:00, душ, Wi-Fi, завтрак)',
+    },
+  ];
+  const checkedCount = checklistItems.filter((item) => item.checked).length;
+  const allChecked = checkedCount === checklistItems.length;
+
+  const guestStepValid = fullName.trim().length >= 2 && passportNo.trim().length >= 4;
+  const roomStepValid = Boolean(selectedOption && conflicts.length === 0);
+  const canSubmit = guestStepValid && roomStepValid && allChecked;
+
+  const blockerReason = useMemo(() => {
+    if (fullName.trim().length < 2) return 'Укажите ФИО гостя на шаге 1';
+    if (passportNo.trim().length < 4) return 'Укажите номер паспорта (минимум 4 символа) на шаге 1';
+    if (!selectedOption) return 'Выберите комнату или койку на шаге 2';
+    if (conflicts.length > 0) return 'Выбранная комната занята на эти даты — выберите свободную';
+    if (!allChecked) {
+      const remaining = checklistItems.length - checkedCount;
+      return `Отметьте оставшиеся пункты протокола (${remaining})`;
+    }
+    return null;
+  }, [fullName, passportNo, selectedOption, conflicts.length, allChecked, checklistItems.length, checkedCount]);
+
+  const emehmonGuestDataText = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          propertyId: state.propertyId,
+          fullName: fullName || 'Guest',
+          passportNo: passportNo || '-',
+          citizenship: normalizedCitizenship,
+          dob,
+          room: selectedOption?.label ?? '',
+          fromDate,
+          nights,
+        },
+        null,
+        2
+      ),
+    [state.propertyId, fullName, passportNo, normalizedCitizenship, dob, selectedOption?.label, fromDate, nights]
   );
 
-  const handleCopyEmehmonJson = () => {
-    const payload = {
-      propertyId: state.propertyId,
-      fullName: fullName || 'Guest',
-      passportNo: passportNo || '-',
-      citizenship,
-      dob,
-      room: selectedOption?.label ?? '',
-      fromDate,
-      nights,
-    };
-    navigator.clipboard?.writeText(JSON.stringify(payload, null, 2)).catch(() => {});
-    pushToast('JSON для E-mehmon скопирован', `${payload.fullName} · ${payload.passportNo}`, 'cobalt');
-  };
-
-  const handleCopyGuestMemo = () => {
+  const guestMemoText = useMemo(() => {
     const { wifiSsid, wifiPass, doorCode } = state.integrations;
-    const memo = [
+    return [
       `Добро пожаловать в Topchan Hostel (Ташкент)! / Welcome to Topchan Hostel!`,
       `Wi-Fi: ${wifiSsid} · Пароль / Password: ${wifiPass}`,
       `Код входной двери / Door code: ${doorCode}`,
@@ -303,9 +351,7 @@ export const CheckInModal: React.FC = () => {
       `Стирка / Laundry: быстрая 22 мин — $2, средняя 55 мин — $3`,
       `Выезд / Check-out: до 12:00`,
     ].join('\n');
-    navigator.clipboard?.writeText(memo).catch(() => {});
-    pushToast('Памятка гостю (RU/EN) скопирована', `Wi-Fi: ${wifiPass} · Дверь: ${doorCode}`, 'emerald');
-  };
+  }, [state.integrations]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,11 +366,11 @@ export const CheckInModal: React.FC = () => {
       guests: [
         {
           fullName: fullName.trim(),
-          citizenship: citizenship.trim().toUpperCase() || 'UZB',
+          citizenship: normalizedCitizenship,
           age: Math.max(0, age),
           passportNo: passportNo.trim().toUpperCase(),
           dob,
-          isForeigner: citizenship.trim().toUpperCase() !== 'UZB',
+          isForeigner: normalizedCitizenship !== 'UZB',
           mrzRaw: mrzInput.trim() || undefined,
           emehmonRegistered: chkEmehmonDone,
           emehmonCheckedOut: false,
@@ -352,501 +398,672 @@ export const CheckInModal: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+          className="fixed inset-0 z-50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+          style={{ backgroundColor: 'var(--backdrop-scrim)' }}
           onClick={closeCheckInModal}
         >
           <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            initial={{ opacity: 0, y: 14, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 300, damping: 28 }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Заселение гостя и сканер MRZ"
-            className="w-full max-w-3xl bg-[#121826] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+            aria-label="Заселение гостя"
+            className="w-full max-w-3xl rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
           >
-            <div className="px-5 py-4 border-b border-white/[0.08] flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <UserPlus className="w-5 h-5 text-[#10B981]" />
-                <div>
-                  <h2 className="text-base font-semibold text-white">Заселение гостя (Check-in)</h2>
-                  <p className="text-xs text-slate-400">
-                    ICAO TD3 MRZ парсер · защита от овербукинга · чек-лист Bnovo &amp; E-mehmon
-                  </p>
+            {/* Header + 3-Step Bar */}
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)] space-y-3.5 shrink-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-9 h-9 rounded-xl border flex items-center justify-center shrink-0"
+                    style={{
+                      backgroundColor: 'var(--tone-emerald-bg)',
+                      borderColor: 'var(--tone-emerald-border)',
+                      color: 'var(--tone-emerald-fg)',
+                    }}
+                  >
+                    <UserPlus className="w-4 h-4" strokeWidth={1.75} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-[var(--text-primary)] truncate">
+                      Новое заселение
+                    </h2>
+                    <p className="text-xs text-[var(--text-muted)] truncate">
+                      Сканер паспорта, проверка пересечений и протокол E-mehmon
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  aria-label="Закрыть окно заселения"
+                  onClick={closeCheckInModal}
+                  className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  <X className="w-4 h-4" strokeWidth={1.75} />
+                </button>
               </div>
-              <button
-                type="button"
-                aria-label="Закрыть окно заселения"
-                onClick={closeCheckInModal}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-[#1A2234]"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              <StepProgress
+                steps={WIZARD_STEPS}
+                currentStep={step}
+                onStepClick={(s) => setStep(s as 1 | 2 | 3)}
+              />
             </div>
 
-            <form onSubmit={handleSubmit} className="overflow-y-auto p-5 space-y-5">
-              {/* MRZ Scanner + Photo OCR Section */}
-              <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-white">
-                    <ScanLine className="w-4 h-4 text-[#3B82F6]" />
-                    <span>Сканер MRZ (2 строки TD3 или фото паспорта)</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handlePhotoUpload}
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      disabled={ocrLoading}
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-2.5 py-1 rounded-lg bg-[#3B82F6]/20 hover:bg-[#3B82F6]/30 text-xs font-semibold text-blue-200 border border-[#3B82F6]/40 inline-flex items-center gap-1.5"
-                    >
-                      {ocrLoading ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Camera className="w-3.5 h-3.5" />
-                      )}
-                      Скан фото паспорта
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyMrzString(SAMPLE_MRZ_ITALY)}
-                      className="px-2.5 py-1 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs text-slate-200 border border-white/[0.08]"
-                    >
-                      Пример: Италия (ITA)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyMrzString(SAMPLE_MRZ_KOREA)}
-                      className="px-2.5 py-1 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs text-slate-200 border border-white/[0.08]"
-                    >
-                      Пример: Корея (KOR)
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  aria-label="Поле ввода MRZ паспорта"
-                  rows={2}
-                  value={mrzInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setMrzInput(v);
-                    const res = parseTd3Mrz(v);
-                    if (res.valid) {
-                      setFullName(res.fullName);
-                      setCitizenship(res.nationality);
-                      setPassportNo(res.passportNo);
-                      setDob(res.dob);
-                      setAge(res.age);
-                    }
-                  }}
-                  placeholder="Вставьте 2 строки MRZ из паспорта (например P<ITAROSSI<<MARCO...)"
-                  className="w-full bg-[#121826] border border-white/[0.08] rounded-lg px-3 py-2 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#3B82F6]"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="text-slate-400">
-                    Фото обрабатывается только в памяти и никогда не сохраняется.
-                  </span>
-                  {ocrNote && <span className="text-blue-300">{ocrNote}</span>}
-                </div>
-                {mrzParsed && (
-                  <div
-                    className={`text-xs ${
-                      mrzParsed.valid ? 'text-[#10B981]' : 'text-[#F59E0B]'
-                    }`}
-                  >
-                    {mrzParsed.valid
-                      ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · Паспорт ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ДР ${mrzParsed.dob} (${mrzParsed.age} лет)`
-                      : mrzParsed.error}
-                  </div>
-                )}
-              </div>
-
-              {/* Room & Date Selection + Live Overbooking Alert */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                    Комната / Койка
-                  </label>
-                  <select
-                    value={selectedKey}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedKey(val);
-                      const opt = allRoomOptions.find((o) => o.key === val);
-                      if (opt) {
-                        setNightlyRate(opt.defaultRate);
-                        setPayAmount(round2(opt.defaultRate * nights));
-                      }
-                    }}
-                    className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                  >
-                    {allRoomOptions.map((opt) => (
-                      <option key={opt.key} value={opt.key}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                    Дата заезда → выезда ({toDate})
-                  </label>
-                  <input
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value || getTashkentTodayIso())}
-                    className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                  />
-                </div>
-
-                {conflicts.length > 0 && (
-                  <div className="sm:col-span-2 bg-[#F43F5E]/10 border border-[#F43F5E]/40 rounded-xl p-3.5 space-y-2.5">
-                    <div className="flex items-start gap-2 text-xs text-rose-200">
-                      <AlertTriangle className="w-4 h-4 text-[#F43F5E] shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-[#F43F5E]">
-                          Овербукинг заблокирован на даты {fromDate} → {toDate}
-                        </p>
-                        <p className="mt-0.5">
-                          Пересечение с бронью {conflicts[0].bnovoId} ({conflicts[0].guestName}:{' '}
-                          {conflicts[0].fromDate} — {conflicts[0].toDate}).
-                        </p>
-                      </div>
-                    </div>
-                    {alternativeRooms.length > 0 && (
-                      <div className="space-y-1.5">
-                        <p className="text-xs font-medium text-slate-300">
-                          Альтернативные свободные комнаты на эти даты (1 клик):
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {alternativeRooms.map((alt) => {
-                            const key = alt.bedId ? `${alt.roomId}:${alt.bedId}` : alt.roomId;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedKey(key);
-                                  const opt = allRoomOptions.find((o) => o.key === key);
-                                  if (opt) {
-                                    setNightlyRate(opt.defaultRate);
-                                    setPayAmount(round2(opt.defaultRate * nights));
-                                  }
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/40 text-xs font-semibold text-emerald-200"
-                              >
-                                {alt.label}
-                              </button>
-                            );
-                          })}
+            {/* Wizard Body */}
+            <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                {/* STEP 1: Guest & Passport */}
+                {step === 1 && (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)]">
+                          <ScanLine
+                            className="w-4 h-4 shrink-0"
+                            strokeWidth={1.75}
+                            style={{ color: 'var(--tone-cobalt-fg)' }}
+                          />
+                          <span>Сканер паспорта (2 строки MRZ или фото)</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handlePhotoUpload}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            disabled={ocrLoading}
+                            onClick={() => fileInputRef.current?.click()}
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold border inline-flex items-center gap-1.5 transition-colors"
+                            style={{
+                              backgroundColor: 'var(--tone-cobalt-bg)',
+                              borderColor: 'var(--tone-cobalt-border)',
+                              color: 'var(--tone-cobalt-fg)',
+                            }}
+                          >
+                            {ocrLoading ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
+                            ) : (
+                              <Camera className="w-3.5 h-3.5" strokeWidth={1.75} />
+                            )}
+                            Скан фото паспорта
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyMrzString(SAMPLE_MRZ_ITALY)}
+                            className="px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] border border-[var(--border-subtle)] transition-colors"
+                          >
+                            Тест: Италия
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyMrzString(SAMPLE_MRZ_KOREA)}
+                            className="px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-medium text-[var(--text-secondary)] border border-[var(--border-subtle)] transition-colors"
+                          >
+                            Тест: Корея
+                          </button>
                         </div>
                       </div>
+
+                      <textarea
+                        aria-label="Поле ввода MRZ паспорта"
+                        rows={2}
+                        value={mrzInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMrzInput(v);
+                          const res = parseTd3Mrz(v);
+                          if (res.valid) {
+                            setFullName(res.fullName);
+                            setCitizenship(res.nationality);
+                            setPassportNo(res.passportNo);
+                            setDob(res.dob);
+                            setAge(res.age);
+                          }
+                        }}
+                        placeholder="Вставьте 2 строки MRZ из паспорта (например P<ITAROSSI<<MARCO...)"
+                        className="ops-input w-full px-3 py-2 font-mono text-xs"
+                      />
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="text-[var(--text-muted)]">
+                          Фото обрабатывается только в памяти и не сохраняется.
+                        </span>
+                        {ocrNote && (
+                          <span style={{ color: 'var(--tone-cobalt-fg)' }}>{ocrNote}</span>
+                        )}
+                      </div>
+
+                      {mrzParsed && (
+                        <div
+                          className="text-xs font-medium"
+                          style={{
+                            color: mrzParsed.valid
+                              ? 'var(--tone-emerald-fg)'
+                              : 'var(--tone-amber-fg)',
+                          }}
+                        >
+                          {mrzParsed.valid
+                            ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · Паспорт ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ДР ${mrzParsed.dob} (${mrzParsed.age} лет)`
+                            : mrzParsed.error}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          ФИО гостя (как в паспорте)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          placeholder="Marco Rossi"
+                          className="ops-input w-full px-3 py-2.5 text-sm"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Номер паспорта
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={passportNo}
+                            onChange={(e) => setPassportNo(e.target.value)}
+                            placeholder="YA4829103"
+                            className="ops-input w-full px-3 py-2.5 font-mono text-sm uppercase"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Гражданство
+                          </label>
+                          <input
+                            type="text"
+                            value={citizenship}
+                            onChange={(e) => setCitizenship(e.target.value)}
+                            placeholder="ITA / UZB"
+                            className="ops-input w-full px-3 py-2.5 font-mono text-sm uppercase"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Дата рождения
+                          </label>
+                          <input
+                            type="date"
+                            value={dob}
+                            onChange={(e) => setDob(e.target.value)}
+                            className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                            Возраст (лет)
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={110}
+                            value={age}
+                            onChange={(e) => setAge(parseInt(e.target.value, 10) || 0)}
+                            className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          Источник брони
+                        </label>
+                        <select
+                          value={source}
+                          onChange={(e) => setSource(e.target.value as typeof source)}
+                          className="ops-input w-full px-3 py-2.5 text-sm"
+                        >
+                          <option value="Bnovo">Bnovo</option>
+                          <option value="Walk-in">С улицы (Walk-in)</option>
+                          <option value="QR Direct">QR Прямая бронь</option>
+                          <option value="Telegram">Telegram</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 2: Room & Payment */}
+                {step === 2 && (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          Комната или койка
+                        </label>
+                        <select
+                          value={selectedKey}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSelectedKey(val);
+                            const opt = allRoomOptions.find((o) => o.key === val);
+                            if (opt) {
+                              setNightlyRate(opt.defaultRate);
+                              setPayAmount(round2(opt.defaultRate * nights));
+                            }
+                          }}
+                          className="ops-input w-full px-3 py-2.5 text-sm"
+                        >
+                          {allRoomOptions.map((opt) => (
+                            <option key={opt.key} value={opt.key}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          Дата заезда → выезд <span className="font-mono tabular-nums">{toDate}</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={fromDate}
+                          onChange={(e) => setFromDate(e.target.value || getTashkentTodayIso())}
+                          className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          Количество ночей
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={60}
+                          value={nights}
+                          onChange={(e) => {
+                            const n = Math.max(1, parseInt(e.target.value, 10) || 1);
+                            setNights(n);
+                            setPayAmount(round2(n * nightlyRate));
+                          }}
+                          className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+                          Тариф за ночь (USD)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={nightlyRate}
+                          onChange={(e) => {
+                            const r = Math.max(1, parseFloat(e.target.value) || 1);
+                            setNightlyRate(r);
+                            setPayAmount(round2(nights * r));
+                          }}
+                          className="ops-input w-full px-3 py-2.5 font-mono tabular-nums text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Overbooking Conflict Guard */}
+                    {conflicts.length > 0 && (
+                      <div
+                        className="rounded-2xl border p-4 space-y-3"
+                        style={{
+                          backgroundColor: 'var(--tone-rose-bg)',
+                          borderColor: 'var(--tone-rose-border)',
+                        }}
+                      >
+                        <div className="flex items-start gap-2.5 text-xs">
+                          <AlertTriangle
+                            className="w-4 h-4 shrink-0 mt-0.5"
+                            strokeWidth={1.75}
+                            style={{ color: 'var(--tone-rose-fg)' }}
+                          />
+                          <div>
+                            <p className="font-semibold" style={{ color: 'var(--tone-rose-fg)' }}>
+                              Овербукинг заблокирован на даты {fromDate} → {toDate}
+                            </p>
+                            <p className="mt-1 text-[var(--text-secondary)]">
+                              Пересечение с бронью {conflicts[0].bnovoId} ({conflicts[0].guestName}:{' '}
+                              <span className="font-mono tabular-nums">
+                                {conflicts[0].fromDate} — {conflicts[0].toDate}
+                              </span>
+                              ).
+                            </p>
+                          </div>
+                        </div>
+                        {alternativeRooms.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-[var(--text-secondary)]">
+                              Свободные комнаты на эти даты (выбор в 1 клик):
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {alternativeRooms.map((alt) => {
+                                const key = alt.bedId ? `${alt.roomId}:${alt.bedId}` : alt.roomId;
+                                return (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedKey(key);
+                                      const opt = allRoomOptions.find((o) => o.key === key);
+                                      if (opt) {
+                                        setNightlyRate(opt.defaultRate);
+                                        setPayAmount(round2(opt.defaultRate * nights));
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors"
+                                    style={{
+                                      backgroundColor: 'var(--tone-emerald-bg)',
+                                      borderColor: 'var(--tone-emerald-border)',
+                                      color: 'var(--tone-emerald-fg)',
+                                    }}
+                                  >
+                                    {alt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Live Tourist Tax (БРВ) Preview */}
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 font-semibold text-[var(--text-primary)]">
+                          <span>
+                            Туристический сбор РУз (БРВ{' '}
+                            <span className="font-mono tabular-nums">
+                              {state.currency.bcvUzs.toLocaleString('ru-RU')}
+                            </span>{' '}
+                            · {taxRatePct}%)
+                          </span>
+                          <TooltipHint
+                            title="Туристический сбор по БРВ"
+                            text="Для объектов до 10 номеров ставка 5% БРВ, свыше 10 номеров — 10% БРВ за иностранного гостя за ночь. Граждане РУз — 0.4% БРВ. Дети до 16 лет освобождены."
+                            align="left"
+                          />
+                        </div>
+                        <p className="text-[var(--text-muted)]">
+                          {age < 16
+                            ? `Ребёнок до 16 лет (${age} лет) — освобождён от турсбора (0 сум)`
+                            : !isForeignGuest
+                              ? `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (гражданин РУз · 0.4% БРВ)`
+                              : `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (иностранец ${normalizedCitizenship})`}
+                        </p>
+                      </div>
+                      <span
+                        className="font-mono tabular-nums text-sm font-bold"
+                        style={{ color: 'var(--tone-emerald-fg)' }}
+                      >
+                        {formatUzs(previewTouristTaxUzs)}
+                      </span>
+                    </div>
+
+                    {/* Payment Block */}
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 space-y-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-2.5 text-sm font-semibold text-[var(--text-primary)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={payNow}
+                            onChange={(e) => setPayNow(e.target.checked)}
+                            className="w-4 h-4 accent-[#059669]"
+                          />
+                          Принять оплату при заезде
+                        </label>
+                        <div className="flex items-center gap-1.5 text-xs font-mono tabular-nums text-[var(--text-secondary)]">
+                          <span>
+                            К оплате:{' '}
+                            <strong className="text-[var(--text-primary)]">
+                              {formatUsd(totalUsd)}
+                            </strong>{' '}
+                            · {formatUzs(totalUzs)} (Acc {state.currency.accRate})
+                          </span>
+                          <TooltipHint
+                            title="Курс проживания (Acc) и курс сдачи (Ex)"
+                            text={`Проживание в сумах считается по курсу Acc (${state.currency.accRate.toLocaleString('ru-RU')}). Если гость даёт доллары или евро и нужна сдача сумами, сдача считается по курсу обмена Ex (${state.currency.exRate.toLocaleString('ru-RU')}).`}
+                            align="right"
+                          />
+                        </div>
+                      </div>
+
+                      {payNow && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs text-[var(--text-muted)] mb-1">
+                              Карман кассы
+                            </label>
+                            <select
+                              value={payPocket}
+                              onChange={(e) => {
+                                const p = e.target.value as CashPocketId;
+                                setPayPocket(p);
+                                if (p === 'cash_usd') setPayCurrency('USD');
+                                else if (p === 'cash_eur') setPayCurrency('EUR');
+                                else setPayCurrency('UZS');
+                              }}
+                              className="ops-input w-full px-3 py-2 text-xs"
+                            >
+                              {paymentPockets.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-[var(--text-muted)] mb-1">
+                              Сумма ({payCurrency})
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={payAmount}
+                              onChange={(e) => setPayAmount(parseFloat(e.target.value) || 0)}
+                              className="ops-input w-full px-3 py-2 font-mono tabular-nums text-xs"
+                            />
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 flex flex-col justify-center text-xs">
+                            <span className="text-[var(--text-muted)]">
+                              {isCashPocket
+                                ? payCurrency === 'UZS'
+                                  ? 'Сдача (сумы → сумы)'
+                                  : `Сдача (курс Ex ${state.currency.exRate})`
+                                : 'Безналичная оплата'}
+                            </span>
+                            <span
+                              className="font-mono tabular-nums text-sm font-bold mt-0.5"
+                              style={{
+                                color:
+                                  isCashPocket && changeUzs > 0
+                                    ? 'var(--tone-amber-fg)'
+                                    : 'var(--text-primary)',
+                              }}
+                            >
+                              {!isCashPocket
+                                ? 'Без сдачи (безнал)'
+                                : changeUzs > 0
+                                  ? formatUzs(changeUzs)
+                                  : '0 сум'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 3: Mandatory Compliance Protocol */}
+                {step === 3 && (
+                  <div className="space-y-5">
+                    {/* Compact Booking Summary */}
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                          {fullName.trim() || 'Гость не указан'}{' '}
+                          <span className="font-mono text-xs text-[var(--text-muted)] ml-1">
+                            {normalizedCitizenship} · {passportNo.trim() || '—'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-[var(--text-secondary)] mt-0.5 font-mono tabular-nums">
+                          {selectedOption?.label ?? 'Комната не выбрана'} · {fromDate} → {toDate} ({nights} н.)
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <StatusPill tone={payNow && payAmount > 0 ? 'emerald' : 'amber'} mono>
+                          {payNow && payAmount > 0
+                            ? `Оплата: ${formatUsd(Math.min(totalUsd, paidUsdEq))}`
+                            : `К оплате: ${formatUsd(totalUsd)}`}
+                        </StatusPill>
+                        <StatusPill tone={allChecked ? 'emerald' : 'amber'} mono>
+                          {checkedCount}/{checklistItems.length}
+                        </StatusPill>
+                      </div>
+                    </div>
+
+                    {/* Individual Checklist (NO Check-All shortcut) */}
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)]">
+                          <CheckSquare
+                            className="w-4 h-4 shrink-0"
+                            strokeWidth={1.75}
+                            style={{ color: 'var(--tone-amber-fg)' }}
+                          />
+                          <span>Обязательный протокол заселения Topchan</span>
+                        </div>
+                        <span className="text-xs text-[var(--text-muted)]">
+                          Отметьте каждый пункт вручную
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {checklistItems.map((item) => (
+                          <label
+                            key={item.id}
+                            className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors text-xs ${
+                              item.checked
+                                ? 'border-[var(--tone-emerald-border)] bg-[var(--tone-emerald-bg)] text-[var(--text-primary)]'
+                                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={(e) => item.set(e.target.checked)}
+                              className="mt-0.5 w-4 h-4 accent-[#059669] shrink-0"
+                            />
+                            <span className="leading-relaxed font-medium">{item.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Quick Copy Actions */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CopyButton
+                        text={emehmonGuestDataText}
+                        label="Данные гостя (E-mehmon)"
+                        onCopied={() =>
+                          pushToast(
+                            'Данные для E-mehmon скопированы',
+                            `${fullName || 'Гость'} · ${passportNo || '—'}`,
+                            'cobalt'
+                          )
+                        }
+                      />
+                      <CopyButton
+                        text={guestMemoText}
+                        label="Памятка гостю (RU/EN)"
+                        onCopied={() =>
+                          pushToast(
+                            'Памятка гостю скопирована',
+                            `Wi-Fi: ${state.integrations.wifiPass} · Дверь: ${state.integrations.doorCode}`,
+                            'emerald'
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky Bottom Footer */}
+              <div className="px-5 py-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] shrink-0 space-y-2.5">
+                {blockerReason && step === 3 && (
+                  <div
+                    className="flex items-center gap-2 text-xs font-medium"
+                    style={{ color: 'var(--tone-amber-fg)' }}
+                  >
+                    <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                    <span>{blockerReason}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-xs font-mono tabular-nums text-[var(--text-secondary)]">
+                    <span className="font-bold text-[var(--text-primary)]">
+                      {formatUsd(totalUsd)}
+                    </span>{' '}
+                    · {formatUzs(totalUzs)} · Турсбор {formatUzs(previewTouristTaxUzs)}
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    {step > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}
+                        className="px-3.5 py-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.75} />
+                        Назад
+                      </button>
+                    )}
+
+                    {step < 3 ? (
+                      <button
+                        type="button"
+                        onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 1 | 2 | 3) : s))}
+                        className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        Далее
+                        <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!canSubmit}
+                        className="px-5 py-2.5 rounded-xl bg-[#059669] hover:bg-[#047857] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs font-semibold transition-colors inline-flex items-center gap-2"
+                      >
+                        <ShieldCheck className="w-4 h-4" strokeWidth={1.75} />
+                        Заселить гостя
+                      </button>
                     )}
                   </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                    ФИО гостя (как в паспорте)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Marco Rossi"
-                    className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Номер паспорта
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={passportNo}
-                      onChange={(e) => setPassportNo(e.target.value)}
-                      placeholder="YA4829103"
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Гражданство
-                    </label>
-                    <input
-                      type="text"
-                      value={citizenship}
-                      onChange={(e) => setCitizenship(e.target.value)}
-                      placeholder="ITA / UZB"
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono text-sm text-white uppercase focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">Ночей</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={60}
-                      value={nights}
-                      onChange={(e) => {
-                        const n = Math.max(1, parseInt(e.target.value, 10) || 1);
-                        setNights(n);
-                        setPayAmount(round2(n * nightlyRate));
-                      }}
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Тариф ($/н)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={nightlyRate}
-                      onChange={(e) => {
-                        const r = Math.max(1, parseFloat(e.target.value) || 1);
-                        setNightlyRate(r);
-                        setPayAmount(round2(nights * r));
-                      }}
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Возраст
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={110}
-                      value={age}
-                      onChange={(e) => setAge(parseInt(e.target.value, 10) || 0)}
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Дата рождения
-                    </label>
-                    <input
-                      type="date"
-                      value={dob}
-                      onChange={(e) => setDob(e.target.value)}
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                      Источник брони
-                    </label>
-                    <select
-                      value={source}
-                      onChange={(e) => setSource(e.target.value as typeof source)}
-                      className="w-full bg-[#0B0F17] border border-white/[0.1] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#3B82F6]"
-                    >
-                      <option value="Bnovo">Bnovo</option>
-                      <option value="Walk-in">Walk-in (с улицы)</option>
-                      <option value="QR Direct">QR Прямая бронь</option>
-                      <option value="Telegram">Telegram</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Live Uzbekistan Tourist Tax (БРВ) Preview */}
-              <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div>
-                  <span className="font-semibold text-slate-200">
-                    Туристический сбор РУз (БРВ {state.currency.bcvUzs.toLocaleString('ru-RU')} ·{' '}
-                    {taxRatePct}%)
-                  </span>
-                  <p className="text-slate-400 mt-0.5">
-                    {age < 16
-                      ? `Ребёнок до 16 лет (${age} лет) — освобождён от турсбора (0 сум)`
-                      : !isForeignGuest
-                        ? `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (гражданин РУз · 0.4% БРВ)`
-                        : `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (иностранец ${normalizedCitizenship})`}
-                  </p>
-                </div>
-                <span className="font-mono tabular-nums text-sm font-bold text-[#10B981]">
-                  {formatUzs(previewTouristTaxUzs)}
-                </span>
-              </div>
-
-              {/* Payment block */}
-              <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-2 text-sm font-medium text-white cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={payNow}
-                      onChange={(e) => setPayNow(e.target.checked)}
-                      className="w-4 h-4 accent-[#10B981]"
-                    />
-                    Принять оплату при заезде
-                  </label>
-                  <div className="text-xs font-mono tabular-nums text-slate-300">
-                    К оплате: <strong className="text-white">{formatUsd(totalUsd)}</strong> ·{' '}
-                    {formatUzs(totalUzs)} (Acc {state.currency.accRate})
-                  </div>
-                </div>
-                {payNow && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">Карман кассы</label>
-                      <select
-                        value={payPocket}
-                        onChange={(e) => {
-                          const p = e.target.value as CashPocketId;
-                          setPayPocket(p);
-                          if (p === 'cash_usd') setPayCurrency('USD');
-                          else if (p === 'cash_eur') setPayCurrency('EUR');
-                          else setPayCurrency('UZS');
-                        }}
-                        className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
-                      >
-                        {paymentPockets.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">Сумма ({payCurrency})</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={payAmount}
-                        onChange={(e) => setPayAmount(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-xs text-white"
-                      />
-                    </div>
-                    <div className="flex flex-col justify-center text-xs">
-                      <span className="text-slate-400">
-                        {isCashPocket
-                          ? payCurrency === 'UZS'
-                            ? 'Сдача (сумы → сумы, без спреда)'
-                            : `Сдача (курс Ex ${state.currency.exRate})`
-                          : 'Безналичная оплата'}
-                      </span>
-                      <span className="font-mono tabular-nums text-sm font-semibold text-[#F59E0B] mt-0.5">
-                        {!isCashPocket
-                          ? 'Без сдачи (безнал)'
-                          : changeUzs > 0
-                            ? formatUzs(changeUzs)
-                            : '0 сум'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Mandatory Reception Checklist (No Check-All shortcut for legal compliance) */}
-              <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-white">
-                    <CheckSquare className="w-4 h-4 text-[#F59E0B]" />
-                    <span>Обязательный протокол заселения Topchan</span>
-                  </div>
-                  <span className="text-xs text-slate-400">
-                    Подтвердите каждый пункт вручную
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {[
-                    {
-                      checked: chkOriginalPassport,
-                      set: setChkOriginalPassport,
-                      label: 'Оригинал паспорта/ID проверен (никаких фото/сканов)',
-                    },
-                    {
-                      checked: chkVisaChecked,
-                      set: setChkVisaChecked,
-                      label: 'Виза / регистрация и срок пребывания проверены',
-                    },
-                    {
-                      checked: chkBnovoPaid,
-                      set: setChkBnovoPaid,
-                      label: 'Оплата отмечена в Bnovo',
-                    },
-                    {
-                      checked: chkEmehmonDone,
-                      set: setChkEmehmonDone,
-                      label: 'Регистрация в E-mehmon оформлена',
-                    },
-                    {
-                      checked: chkTourDone,
-                      set: setChkTourDone,
-                      label: 'Хостел показан (кухня до 00:00, душ, Wi-Fi)',
-                    },
-                  ].map((item) => (
-                    <label
-                      key={item.label}
-                      className="flex items-start gap-2.5 p-2 rounded-lg hover:bg-[#1A2234]/60 cursor-pointer text-slate-200"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.checked}
-                        onChange={(e) => item.set(e.target.checked)}
-                        className="mt-0.5 w-4 h-4 accent-[#10B981] shrink-0"
-                      />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Helper Copy Actions + Submit */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.08]">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyEmehmonJson}
-                    className="px-3 py-2 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-medium text-slate-200 border border-white/[0.08] inline-flex items-center gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Скопировать JSON для E-mehmon
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCopyGuestMemo}
-                    className="px-3 py-2 rounded-lg bg-[#1A2234] hover:bg-slate-700 text-xs font-medium text-slate-200 border border-white/[0.08] inline-flex items-center gap-1.5"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    Скопировать памятку гостю (RU/EN)
-                  </button>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="px-5 py-2.5 rounded-lg bg-[#10B981] hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 text-sm font-semibold transition-colors inline-flex items-center gap-2"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  Заселить гостя
-                </button>
               </div>
             </form>
           </motion.div>

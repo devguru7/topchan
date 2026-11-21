@@ -1,16 +1,46 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { TabId, ToastItem } from '../types/ops';
 import { makeId, type CheckInPreselect } from '../store/types';
 
+export type UITheme = 'dark' | 'light';
+export type GridFilterId = 'all' | 'available' | 'occupied' | 'checkout' | 'debt' | 'dirty';
+export type SettingsSubTab = 'telegram' | 'currency' | 'rooms' | 'integrations' | 'audit';
+export type ServicesSubTab = 'laundry_hk' | 'luggage_transfers' | 'stock_contacts' | 'qr_guide';
+
+const THEME_STORAGE_KEY = 'topchan_ui_theme';
+
+function readInitialTheme(): UITheme {
+  if (typeof window === 'undefined') return 'dark';
+  try {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    // ignore storage access issues
+  }
+  return 'dark';
+}
+
 export interface UIContextValue {
+  theme: UITheme;
+  setTheme: (theme: UITheme) => void;
+  toggleTheme: () => void;
   activeTab: TabId;
   setActiveTab: (tab: TabId) => void;
+  gridFilter: GridFilterId;
+  setGridFilter: (filter: GridFilterId) => void;
+  settingsSubTab: SettingsSubTab;
+  setSettingsSubTab: (sub: SettingsSubTab) => void;
+  servicesSubTab: ServicesSubTab;
+  setServicesSubTab: (sub: ServicesSubTab) => void;
   sidePanelOpen: boolean;
   setSidePanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>;
   selectedBookingId: string | null;
   setSelectedBookingId: (id: string | null) => void;
+  folioAutoOpenPayment: boolean;
+  openBookingFolio: (bookingId: string, options?: { openPayment?: boolean }) => void;
+  clearFolioAutoOpenPayment: () => void;
   checkInPreselect: CheckInPreselect | null;
   openCheckInModal: (preselect?: CheckInPreselect) => void;
   closeCheckInModal: () => void;
@@ -28,14 +58,54 @@ export interface UIContextValue {
 const UIContext = createContext<UIContextValue | null>(null);
 
 export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [theme, setThemeState] = useState<UITheme>(() => readInitialTheme());
   const [activeTab, setActiveTab] = useState<TabId>('grid');
+  const [gridFilter, setGridFilter] = useState<GridFilterId>('all');
+  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('telegram');
+  const [servicesSubTab, setServicesSubTab] = useState<ServicesSubTab>('laundry_hk');
   const [sidePanelOpen, setSidePanelOpen] = useState<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
-  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [selectedBookingId, setSelectedBookingIdState] = useState<string | null>(null);
+  const [folioAutoOpenPayment, setFolioAutoOpenPayment] = useState<boolean>(false);
   const [checkInPreselect, setCheckInPreselect] = useState<CheckInPreselect | null>(null);
   const [checkOutBookingId, setCheckOutBookingId] = useState<string | null>(null);
   const [qrPosterRoomId, setQrPosterRoomId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = theme;
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [theme]);
+
+  const setTheme = useCallback((next: UITheme) => {
+    setThemeState(next);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  const setSelectedBookingId = useCallback((id: string | null) => {
+    setSelectedBookingIdState(id);
+    if (!id) setFolioAutoOpenPayment(false);
+  }, []);
+
+  const openBookingFolio = useCallback(
+    (bookingId: string, options?: { openPayment?: boolean }) => {
+      setFolioAutoOpenPayment(Boolean(options?.openPayment));
+      setSelectedBookingIdState(bookingId);
+    },
+    []
+  );
+
+  const clearFolioAutoOpenPayment = useCallback(() => {
+    setFolioAutoOpenPayment(false);
+  }, []);
 
   const pushToast = useCallback(
     (title: string, description?: string, tone: ToastItem['tone'] = 'emerald') => {
@@ -78,14 +148,26 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const value = useMemo<UIContextValue>(
     () => ({
+      theme,
+      setTheme,
+      toggleTheme,
       activeTab,
       setActiveTab,
+      gridFilter,
+      setGridFilter,
+      settingsSubTab,
+      setSettingsSubTab,
+      servicesSubTab,
+      setServicesSubTab,
       sidePanelOpen,
       setSidePanelOpen,
       commandPaletteOpen,
       setCommandPaletteOpen,
       selectedBookingId,
       setSelectedBookingId,
+      folioAutoOpenPayment,
+      openBookingFolio,
+      clearFolioAutoOpenPayment,
       checkInPreselect,
       openCheckInModal,
       closeCheckInModal,
@@ -100,10 +182,20 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       dismissToast,
     }),
     [
+      theme,
+      setTheme,
+      toggleTheme,
       activeTab,
+      gridFilter,
+      settingsSubTab,
+      servicesSubTab,
       sidePanelOpen,
       commandPaletteOpen,
       selectedBookingId,
+      setSelectedBookingId,
+      folioAutoOpenPayment,
+      openBookingFolio,
+      clearFolioAutoOpenPayment,
       checkInPreselect,
       openCheckInModal,
       closeCheckInModal,
