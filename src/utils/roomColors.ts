@@ -12,6 +12,7 @@ export const TOPCHAN_ROOM_COLORS: Record<string, string> = {
   'cat-green': '#059669',
   'cat-blue': '#2563EB',
   'cat-mix-dorm': '#0D9488',
+  'cat-six-dorm': '#0284C7',
   'cat-fem-dorm': '#9333EA',
 };
 

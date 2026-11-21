@@ -1,23 +1,31 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { TabId, ToastItem } from '../types/ops';
 import { makeId, type CheckInPreselect } from '../store/types';
+import { getTashkentTodayIso } from '../utils/time';
 
 export type UITheme = 'dark' | 'light';
+export type GridViewMode = 'tape' | 'cards';
 export type GridFilterId = 'all' | 'available' | 'occupied' | 'checkout' | 'debt' | 'dirty';
+export type ShiftSubTab = 'autopilot' | 'emehmon';
 export type SettingsSubTab = 'telegram' | 'currency' | 'rooms' | 'integrations' | 'audit';
 export type ServicesSubTab = 'laundry_hk' | 'luggage_transfers' | 'stock_contacts' | 'qr_guide';
 
 const THEME_STORAGE_KEY = 'topchan_ui_theme';
 
 function readInitialTheme(): UITheme {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return 'light';
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
   } catch {
     // ignore storage access issues
   }
-  return 'dark';
+  return 'light';
+}
+
+function readInitialGridViewMode(): GridViewMode {
+  if (typeof window === 'undefined') return 'tape';
+  return window.innerWidth < 1024 ? 'cards' : 'tape';
 }
 
 export interface UIContextValue {
@@ -26,8 +34,16 @@ export interface UIContextValue {
   toggleTheme: () => void;
   activeTab: TabId;
   setActiveTab: (tab: TabId) => void;
+  gridViewMode: GridViewMode;
+  setGridViewMode: (mode: GridViewMode) => void;
+  tapeStartDate: string;
+  setTapeStartDate: React.Dispatch<React.SetStateAction<string>>;
+  tapeCategoryFilter: string;
+  setTapeCategoryFilter: (cat: string) => void;
   gridFilter: GridFilterId;
   setGridFilter: (filter: GridFilterId) => void;
+  shiftSubTab: ShiftSubTab;
+  setShiftSubTab: (sub: ShiftSubTab) => void;
   settingsSubTab: SettingsSubTab;
   setSettingsSubTab: (sub: SettingsSubTab) => void;
   servicesSubTab: ServicesSubTab;
@@ -60,7 +76,11 @@ const UIContext = createContext<UIContextValue | null>(null);
 export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<UITheme>(() => readInitialTheme());
   const [activeTab, setActiveTab] = useState<TabId>('grid');
+  const [gridViewMode, setGridViewMode] = useState<GridViewMode>(() => readInitialGridViewMode());
+  const [tapeStartDate, setTapeStartDate] = useState<string>(() => getTashkentTodayIso());
+  const [tapeCategoryFilter, setTapeCategoryFilter] = useState<string>('all');
   const [gridFilter, setGridFilter] = useState<GridFilterId>('all');
+  const [shiftSubTab, setShiftSubTab] = useState<ShiftSubTab>('autopilot');
   const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('telegram');
   const [servicesSubTab, setServicesSubTab] = useState<ServicesSubTab>('laundry_hk');
   const [sidePanelOpen, setSidePanelOpen] = useState<boolean>(false);
@@ -153,8 +173,16 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       toggleTheme,
       activeTab,
       setActiveTab,
+      gridViewMode,
+      setGridViewMode,
+      tapeStartDate,
+      setTapeStartDate,
+      tapeCategoryFilter,
+      setTapeCategoryFilter,
       gridFilter,
       setGridFilter,
+      shiftSubTab,
+      setShiftSubTab,
       settingsSubTab,
       setSettingsSubTab,
       servicesSubTab,
@@ -186,7 +214,11 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       setTheme,
       toggleTheme,
       activeTab,
+      gridViewMode,
+      tapeStartDate,
+      tapeCategoryFilter,
       gridFilter,
+      shiftSubTab,
       settingsSubTab,
       servicesSubTab,
       sidePanelOpen,

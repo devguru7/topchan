@@ -31,6 +31,8 @@ export interface RoomCategory {
   bathroomType: BathroomType;
   isDorm: boolean;
   maxOccupancy: number;
+  bedType?: string;
+  femaleOnly?: boolean;
   pricesUsd: Record<number, number>; // occupancy (1,2,3,4) -> USD per night (or 1 -> per bed for dorm)
   bnovoCategoryId: string;
 }

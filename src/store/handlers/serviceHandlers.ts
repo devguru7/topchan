@@ -211,6 +211,75 @@ export function handleAdminApproveHousekeeping(
   };
 }
 
+export function handleSetRoomHousekeepingStatus(
+  state: AppState,
+  payload: { roomId: string; bedId?: string; status: 'available' | 'dirty' | 'maintenance' },
+  nowIso = new Date().toISOString()
+): AppState {
+  const room = state.physicalRooms.find((r) => r.id === payload.roomId);
+  if (!room) return state;
+
+  if (payload.bedId && room.beds) {
+    const bed = room.beds.find((b) => b.id === payload.bedId);
+    if (!bed || bed.status === 'occupied' || bed.status === payload.status) return state;
+  } else {
+    if (room.status === 'occupied' || room.status === payload.status) return state;
+  }
+
+  const bedObj = payload.bedId ? room.beds?.find((b) => b.id === payload.bedId) : undefined;
+  const roomLabel = bedObj ? `${room.code} ${bedObj.label}` : room.code;
+
+  const nextRooms = state.physicalRooms.map((r) => {
+    if (r.id !== payload.roomId) return r;
+    if (payload.bedId && r.beds) {
+      return {
+        ...r,
+        beds: r.beds.map((b) =>
+          b.id === payload.bedId ? { ...b, status: payload.status } : b
+        ),
+      };
+    }
+    return { ...r, status: payload.status };
+  });
+
+  let nextTasks = state.housekeepingTasks;
+  if (payload.status === 'available') {
+    nextTasks = state.housekeepingTasks.map((t) =>
+      t.roomId === payload.roomId && (t.bedId ?? undefined) === (payload.bedId ?? undefined) && t.status !== 'approved'
+        ? { ...t, status: 'approved' as const }
+        : t
+    );
+  } else if (payload.status === 'dirty') {
+    const hasOpen = state.housekeepingTasks.some(
+      (t) =>
+        t.roomId === payload.roomId &&
+        (t.bedId ?? undefined) === (payload.bedId ?? undefined) &&
+        t.status !== 'approved'
+    );
+    if (!hasOpen) {
+      nextTasks = [
+        {
+          id: makeId('hk'),
+          propertyId: state.propertyId,
+          roomId: payload.roomId,
+          bedId: payload.bedId,
+          roomLabel,
+          status: 'dirty' as const,
+          createdAt: nowIso,
+          notes: 'Отмечено на Шахматке — требуется уборка',
+        },
+        ...state.housekeepingTasks,
+      ];
+    }
+  }
+
+  return {
+    ...state,
+    physicalRooms: nextRooms,
+    housekeepingTasks: nextTasks,
+  };
+}
+
 export function handleAddLuggage(
   state: AppState,
   params: AddLuggagePayload,

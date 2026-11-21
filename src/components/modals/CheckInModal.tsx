@@ -62,22 +62,28 @@ export const CheckInModal: React.FC = () => {
       const cat = state.roomCategories.find((c) => c.id === room.categoryId);
       const defaultRate = cat?.pricesUsd[1] ?? 18;
       if (room.beds) {
+        const femaleNote = cat?.femaleOnly ? ' · Женский' : '';
         for (const bed of room.beds) {
           items.push({
             key: `${room.id}:${bed.id}`,
             roomId: room.id,
             bedId: bed.id,
-            label: `${room.code} · Койка ${bed.label} (${bed.tier}) — $${defaultRate}/н`,
+            label: `${room.code} · ${bed.label} (${bed.tier}${femaleNote}) — $${defaultRate}/н`,
             categoryId: room.categoryId,
             defaultRate,
             isCurrentlyFree: bed.status === 'available',
           });
         }
       } else {
+        const metaNote = cat?.bedType
+          ? ' · 1 большая кровать'
+          : cat
+            ? ` · до ${cat.maxOccupancy} чел.`
+            : '';
         items.push({
           key: room.id,
           roomId: room.id,
-          label: `${room.code} — $${defaultRate}/н`,
+          label: `${room.code}${metaNote} — $${defaultRate}/н`,
           categoryId: room.categoryId,
           defaultRate,
           isCurrentlyFree: room.status === 'available',
@@ -427,9 +433,24 @@ export const CheckInModal: React.FC = () => {
                     <UserPlus className="w-4 h-4" strokeWidth={1.75} />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="text-base font-semibold text-[var(--text-primary)] truncate">
-                      Новое заселение
-                    </h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-base font-semibold text-[var(--text-primary)] truncate">
+                        Новое заселение
+                      </h2>
+                      {selectedOption && (
+                        <span
+                          data-testid="checkin-prefill-summary"
+                          className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md border"
+                          style={{
+                            backgroundColor: 'var(--tone-cobalt-bg)',
+                            borderColor: 'var(--tone-cobalt-border)',
+                            color: 'var(--tone-cobalt-fg)',
+                          }}
+                        >
+                          {selectedOption.label.split(' — ')[0]} · с {fromDate}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-[var(--text-muted)] truncate">
                       Сканер паспорта, проверка пересечений и протокол E-mehmon
                     </p>
@@ -1056,7 +1077,7 @@ export const CheckInModal: React.FC = () => {
                       <button
                         type="submit"
                         disabled={!canSubmit}
-                        className="px-5 py-2.5 rounded-xl bg-[#059669] hover:bg-[#047857] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs font-semibold transition-colors inline-flex items-center gap-2"
+                        className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs font-semibold transition-colors inline-flex items-center gap-2"
                       >
                         <ShieldCheck className="w-4 h-4" strokeWidth={1.75} />
                         Заселить гостя

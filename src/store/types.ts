@@ -150,6 +150,11 @@ export type OpsAction =
   | { type: 'SPEED_UP_LAUNDRY'; payload: { jobId: string; minusMinutes?: number }; timeHm?: string }
   | { type: 'MAID_MARK_CLEANED'; payload: { taskId: string }; timeHm?: string }
   | { type: 'ADMIN_APPROVE_HOUSEKEEPING'; payload: { taskId: string } }
+  | {
+      type: 'SET_ROOM_HOUSEKEEPING_STATUS';
+      payload: { roomId: string; bedId?: string; status: 'available' | 'dirty' | 'maintenance' };
+      nowIso?: string;
+    }
   | { type: 'ADD_LUGGAGE'; payload: AddLuggagePayload; nowIso?: string }
   | { type: 'RELEASE_LUGGAGE'; payload: { id: string } }
   | { type: 'ADD_TRANSFER'; payload: AddTransferPayload }

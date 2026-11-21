@@ -6,11 +6,13 @@ import {
   Banknote,
   BedDouble,
   Bot,
+  CalendarRange,
   CheckCircle2,
   Chrome,
   Clock,
   Command,
   Moon,
+  Plus,
   Search,
   Sparkles,
   Sun,
@@ -41,15 +43,19 @@ import { SettingsTab } from './components/tabs/SettingsTab';
 const TashkentClock: React.FC = () => {
   const { clockStr, todayRu } = useTimers();
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] whitespace-nowrap shrink-0">
-      <span className="hidden sm:inline">Ташкент (UZT)</span>
+    <span className="inline-flex items-center gap-2 text-xs text-[var(--text-secondary)] whitespace-nowrap shrink-0">
+      <span className="hidden sm:inline font-medium text-[var(--text-muted)]">Ташкент</span>
       <span
-        className="font-mono tabular-nums font-semibold"
-        style={{ color: 'var(--tone-emerald-fg)' }}
+        className="font-mono tabular-nums font-bold px-2 py-0.5 rounded-md border"
+        style={{
+          color: 'var(--tone-emerald-fg)',
+          backgroundColor: 'var(--tone-emerald-bg)',
+          borderColor: 'var(--tone-emerald-border)',
+        }}
       >
         {clockStr}
       </span>
-      <span className="sr-only">{todayRu}</span>
+      <span className="hidden xl:inline text-[var(--text-muted)]">{todayRu}</span>
     </span>
   );
 };
@@ -61,10 +67,10 @@ const NAV_ITEMS: Array<{
   shortLabel: string;
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
 }> = [
-  { id: 'grid', shortcut: '1', label: 'Шахматка', shortLabel: 'Шахматка', icon: BedDouble },
-  { id: 'shift', shortcut: '2', label: 'Смена и Автопилот', shortLabel: 'Смена', icon: Clock },
-  { id: 'cash', shortcut: '3', label: 'Касса', shortLabel: 'Касса', icon: Banknote },
-  { id: 'services', shortcut: '4', label: 'Сервисы и QR', shortLabel: 'Сервисы', icon: WashingMachine },
+  { id: 'grid', shortcut: '1', label: 'Шахматка', shortLabel: 'Шахматка', icon: CalendarRange },
+  { id: 'shift', shortcut: '2', label: 'Смена и E-mehmon', shortLabel: 'Смена', icon: Clock },
+  { id: 'cash', shortcut: '3', label: 'Касса и Сейф', shortLabel: 'Касса', icon: Banknote },
+  { id: 'services', shortcut: '4', label: 'Сервисы и Уборка', shortLabel: 'Сервисы', icon: WashingMachine },
   { id: 'settings', shortcut: '5', label: 'Настройки и Бот', shortLabel: 'Настройки', icon: Bot },
 ];
 
@@ -86,6 +92,7 @@ const OpsWorkspace: React.FC = () => {
     activeTab,
     setActiveTab,
     setGridFilter,
+    setShiftSubTab,
     setSettingsSubTab,
     setServicesSubTab,
     sidePanelOpen,
@@ -129,7 +136,6 @@ const OpsWorkspace: React.FC = () => {
         return;
       }
 
-      // Ignore single-key shortcuts while typing or while any modal/palette is open
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
       if (
@@ -174,15 +180,28 @@ const OpsWorkspace: React.FC = () => {
 
   const unreadAlertsCount = state.telegramAlerts.filter((a) => !a.resolved).length;
   const activeLaundryCount = state.laundryJobs.filter((j) => j.status === 'running').length;
+  const unregisteredForeignersCount = useMemo(
+    () =>
+      state.bookings
+        .filter((b) => b.status === 'active')
+        .reduce(
+          (sum, b) => sum + b.guests.filter((g) => g.isForeigner && !g.emehmonRegistered).length,
+          0
+        ),
+    [state.bookings]
+  );
+
+  // Inventory quick counter for sidebar footer (20 rooms / 20 dorm beds)
+  const inventoryStats = useMemo(() => {
+    const activeRooms = state.physicalRooms.filter((r) => !r.archived);
+    const privateCount = activeRooms.filter((r) => !r.beds).length;
+    const dormBedsCount = activeRooms.reduce((s, r) => s + (r.beds?.length ?? 0), 0);
+    return { totalRooms: activeRooms.length, privateCount, dormBedsCount };
+  }, [state.physicalRooms]);
 
   // Compute #1 Operational Focus Priority ("Фокус смены")
   const shiftFocus = useMemo(() => {
     const activeBookings = state.bookings.filter((b) => b.status === 'active');
-
-    const unregisteredForeignersCount = activeBookings.reduce(
-      (sum, b) => sum + b.guests.filter((g) => g.isForeigner && !g.emehmonRegistered).length,
-      0
-    );
 
     const checkoutWithDebtCount = activeBookings.filter(
       (b) => b.checkingOutToday && calcBookingTotals(b).debtUsd > 0
@@ -195,19 +214,24 @@ const OpsWorkspace: React.FC = () => {
     if (unregisteredForeignersCount > 0 || checkoutWithDebtCount > 0) {
       const parts: string[] = [];
       if (checkoutWithDebtCount > 0) {
-        parts.push(`Выезд 12:00 с долгом $${checkoutDebtTotal}`);
+        parts.push(`Выезд сегодня 12:00 с долгом $${checkoutDebtTotal}`);
       }
       if (unregisteredForeignersCount > 0) {
-        parts.push(`Не оформлен E-mehmon: ${unregisteredForeignersCount} иностр.`);
+        parts.push(`Нужна рег. E-mehmon: ${unregisteredForeignersCount} иностр.`);
       }
       return {
         tone: 'rose' as const,
-        label: 'Срочный приоритет',
+        label: 'Фокус смены',
         message: parts.join(' · '),
-        ctaLabel: 'Открыть выезды',
+        ctaLabel: unregisteredForeignersCount > 0 ? 'Открыть реестр E-mehmon' : 'Открыть выезды',
         onAction: () => {
-          setActiveTab('grid');
-          setGridFilter(checkoutWithDebtCount > 0 ? 'checkout' : 'occupied');
+          if (unregisteredForeignersCount > 0) {
+            setShiftSubTab('emehmon');
+            setActiveTab('shift');
+          } else {
+            setActiveTab('grid');
+            setGridFilter('checkout');
+          }
         },
       };
     }
@@ -225,9 +249,9 @@ const OpsWorkspace: React.FC = () => {
       }
       return {
         tone: 'amber' as const,
-        label: 'Требует внимания',
+        label: 'Фокус смены',
         message: parts.join(' · '),
-        ctaLabel: 'Проверить сейчас',
+        ctaLabel: 'Открыть уборку',
         onAction: () => {
           setServicesSubTab('laundry_hk');
           setActiveTab('services');
@@ -238,7 +262,7 @@ const OpsWorkspace: React.FC = () => {
     return {
       tone: 'emerald' as const,
       label: 'Фокус смены',
-      message: 'Смена под контролем · Долгов и срочных задач нет',
+      message: 'Смена под контролем · Все иностранцы в E-mehmon, долгов по выездам нет',
       ctaLabel: null,
       onAction: null,
     };
@@ -246,8 +270,10 @@ const OpsWorkspace: React.FC = () => {
     state.bookings,
     state.housekeepingTasks,
     state.laundryJobs,
+    unregisteredForeignersCount,
     setActiveTab,
     setGridFilter,
+    setShiftSubTab,
     setServicesSubTab,
   ]);
 
@@ -261,7 +287,7 @@ const OpsWorkspace: React.FC = () => {
     }
     if (storageKind === 'supabase' && syncStatusInfo.status === 'synced') {
       return {
-        label: 'Синхронизировано',
+        label: 'Облако',
         color: 'var(--tone-emerald-fg)',
         bg: 'var(--tone-emerald-bg)',
       };
@@ -275,144 +301,218 @@ const OpsWorkspace: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col lg:flex-row">
-      {/* Desktop Left Navigation Rail (>= 1024px) */}
+      {/* Desktop Deep Hospitality Navy Sidebar (248px, >= 1024px) */}
       <aside
         aria-label="Основная навигация"
-        className="hidden lg:flex lg:flex-col lg:w-60 lg:shrink-0 bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] h-screen sticky top-0 no-print"
+        className="hidden lg:flex lg:flex-col lg:w-[248px] lg:shrink-0 h-screen sticky top-0 no-print border-r"
+        style={{
+          backgroundColor: 'var(--sidebar-bg)',
+          borderColor: 'var(--sidebar-border)',
+          color: 'var(--sidebar-text)',
+        }}
       >
-        <div className="px-5 h-16 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+        {/* Property Brand Header */}
+        <div
+          className="px-4 h-16 border-b flex items-center gap-3"
+          style={{ borderColor: 'var(--sidebar-border)' }}
+        >
+          <div className="w-9 h-9 rounded-xl bg-[#2563EB] flex items-center justify-center text-white shrink-0 shadow-sm">
+            <BedDouble className="w-4 h-4" strokeWidth={1.75} />
+          </div>
           <div className="min-w-0">
-            <div className="text-base font-bold tracking-tight text-[var(--text-primary)] truncate">
+            <div className="text-sm font-bold tracking-tight text-white truncate">
               Topchan Ops
             </div>
-            <div className="text-xs text-[var(--text-muted)] truncate">
-              {state.integrations.propertyName}
+            <div className="text-xs truncate" style={{ color: 'var(--sidebar-muted)' }}>
+              {inventoryStats.totalRooms} комнат · {inventoryStats.dormBedsCount} коек
             </div>
           </div>
         </div>
 
+        {/* Navigation Items */}
         <nav className="flex-1 p-3 space-y-1">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
-            const counter =
-              item.id === 'settings' && unreadAlertsCount > 0
-                ? unreadAlertsCount
-                : item.id === 'services' && activeLaundryCount > 0
-                  ? activeLaundryCount
-                  : 0;
+            const badgeCount =
+              item.id === 'shift' && unregisteredForeignersCount > 0
+                ? unregisteredForeignersCount
+                : item.id === 'settings' && unreadAlertsCount > 0
+                  ? unreadAlertsCount
+                  : item.id === 'services' && activeLaundryCount > 0
+                    ? activeLaundryCount
+                    : 0;
+            const isDangerBadge = item.id === 'shift' && unregisteredForeignersCount > 0;
 
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setActiveTab(item.id)}
-                className={`relative w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                className="relative w-full flex items-center justify-between gap-2 px-2.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors whitespace-nowrap"
+                style={
                   active
-                    ? 'text-[var(--text-primary)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                }`}
+                    ? {
+                        backgroundColor: 'var(--sidebar-active-bg)',
+                        color: 'var(--sidebar-active-text)',
+                        boxShadow: 'inset 3px 0 0 var(--sidebar-active-border)',
+                      }
+                    : {
+                        color: 'var(--sidebar-text)',
+                      }
+                }
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.backgroundColor = 'var(--sidebar-hover)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
               >
-                {active && (
-                  <motion.span
-                    layoutId="desktopNavRailPill"
-                    transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-                    className="absolute inset-0 bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-xl"
-                  />
-                )}
-                <span className="relative z-10 flex items-center gap-2.5 min-w-0">
+                <span className="flex items-center gap-2.5 min-w-0">
                   <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                   <span className="truncate">{item.label}</span>
                 </span>
-                <span className="relative z-10 flex items-center gap-1.5 shrink-0">
-                  {counter > 0 && (
+                <span className="flex items-center gap-1 shrink-0">
+                  {badgeCount > 0 ? (
                     <span
-                      className="font-mono tabular-nums text-xs font-bold px-1.5 py-0.5 rounded-full leading-none"
+                      className={`font-mono tabular-nums text-xs font-bold px-1.5 py-0.5 rounded-md leading-none ${
+                        isDangerBadge
+                          ? 'bg-[#DC2626] text-white'
+                          : 'bg-[#2563EB] text-white'
+                      }`}
+                    >
+                      {badgeCount}
+                    </span>
+                  ) : (
+                    <kbd
+                      className="hidden xl:inline-flex items-center justify-center w-5 h-5 rounded text-xs font-mono"
                       style={{
-                        backgroundColor: 'var(--tone-cobalt-bg)',
-                        color: 'var(--tone-cobalt-fg)',
+                        backgroundColor: 'rgba(255,255,255,0.07)',
+                        color: 'var(--sidebar-muted)',
                       }}
                     >
-                      {counter}
-                    </span>
+                      {item.shortcut}
+                    </kbd>
                   )}
-                  <kbd className="hidden xl:inline-flex items-center justify-center w-5 h-5 rounded-md text-xs font-mono text-[var(--text-muted)] bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
-                    {item.shortcut}
-                  </kbd>
                 </span>
               </button>
             );
           })}
         </nav>
 
-        {/* Quiet shift & keyboard cheatsheet footer */}
-        <div className="p-4 border-t border-[var(--border-subtle)] space-y-2.5 text-xs">
-          <div className="flex items-center justify-between text-[var(--text-muted)]">
-            <span>Смена</span>
-            <span className="font-medium text-[var(--text-secondary)] truncate max-w-[140px]">
-              {state.adminName}
+        {/* Sidebar Footer: Shift Admin + 1-Click Night Shift Toggle */}
+        <div
+          className="p-3.5 border-t space-y-3"
+          style={{ borderColor: 'var(--sidebar-border)' }}
+        >
+          <div className="px-1 space-y-1 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span style={{ color: 'var(--sidebar-muted)' }}>Дежурный</span>
+              <span className="font-semibold text-white truncate max-w-[135px]">
+                {state.adminName}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span style={{ color: 'var(--sidebar-muted)' }}>Быстрый заезд</span>
+              <kbd
+                className="px-1.5 py-0.5 rounded font-mono text-xs text-white"
+                style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
+              >
+                N
+              </kbd>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            data-testid="sidebar-theme-toggle"
+            aria-label={
+              theme === 'dark' ? 'Переключить на дневной режим' : 'Включить ночную смену (тёмный режим)'
+            }
+            className="w-full h-10 px-3 rounded-xl flex items-center justify-between gap-2 text-xs font-semibold transition-colors border"
+            style={{
+              backgroundColor: 'var(--sidebar-surface)',
+              borderColor: 'var(--sidebar-border)',
+              color: '#FFFFFF',
+            }}
+          >
+            <span className="inline-flex items-center gap-2 truncate">
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-[#FBBF24] shrink-0" strokeWidth={1.75} />
+              ) : (
+                <Moon className="w-4 h-4 text-[#93C5FD] shrink-0" strokeWidth={1.75} />
+              )}
+              <span className="truncate">
+                {theme === 'dark' ? 'Дневной режим' : 'Ночная смена'}
+              </span>
             </span>
-          </div>
-          <div className="flex items-center justify-between text-[var(--text-muted)]">
-            <span>Быстрый заезд</span>
-            <kbd className="px-1.5 py-0.5 rounded-md font-mono text-xs bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-              N
-            </kbd>
-          </div>
+            <span
+              className="text-xs font-mono px-1.5 py-0.5 rounded"
+              style={{
+                backgroundColor: theme === 'dark' ? 'rgba(251,191,36,0.18)' : 'rgba(59,130,246,0.22)',
+                color: theme === 'dark' ? '#FDE68A' : '#BFDBFE',
+              }}
+            >
+              {theme === 'dark' ? 'Ночь' : 'День'}
+            </span>
+          </button>
         </div>
       </aside>
 
-      {/* Main Column: Calm Top Header + Focus Strip + Workspace */}
+      {/* Main Column: Clean PMS Header + Focus Strip + Workspace */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Single-Row Calm Header */}
-        <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 no-print">
-          {/* Left: Brand (on mobile) + Live Tashkent Clock */}
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="lg:hidden text-base font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0">
+        {/* Single-Row PMS Top Bar (Uniform h-10 controls, Single Primary CTA) */}
+        <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-3 no-print">
+          {/* Left: Brand (on mobile) + Live Tashkent Clock + CBU Rate */}
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <span className="lg:hidden text-sm font-bold tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0">
               Topchan Ops
             </span>
             <TashkentClock />
-          </div>
-
-          {/* Right: Live CBU USD Pill, Cmd+K, Sync Status, Theme Toggle, Chrome Bridge */}
-          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => {
                 setSettingsSubTab('currency');
                 setActiveTab('settings');
               }}
-              title="Настроить курсы валют (Acc / Ex) и БРВ"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-mono tabular-nums text-[var(--text-secondary)] transition-colors whitespace-nowrap"
+              title="Курс ЦБ РУз и настройки расчётных курсов"
+              className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-mono tabular-nums text-[var(--text-secondary)] transition-colors whitespace-nowrap"
             >
               <span className="text-[var(--text-muted)] font-sans">ЦБ USD</span>
-              <span className="font-semibold text-[var(--text-primary)]">
+              <span className="font-bold text-[var(--text-primary)]">
                 {state.currency.cbuUsd.toLocaleString('ru-RU')}
               </span>
             </button>
+          </div>
 
+          {/* Right: Search/Command (Cmd+K), Sync Status, Mobile Night Toggle, Bridge, ONE Primary CTA */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setCommandPaletteOpen(true)}
               aria-label="Открыть быстрый поиск и команды"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors whitespace-nowrap min-h-[38px]"
+              className="inline-flex items-center gap-2 h-10 px-3 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors whitespace-nowrap"
             >
-              <Search className="w-3.5 h-3.5 text-[var(--text-muted)]" strokeWidth={1.75} />
-              <span className="hidden md:inline">Поиск и команды</span>
+              <Search className="w-4 h-4 text-[var(--text-muted)]" strokeWidth={1.75} />
+              <span className="hidden md:inline">Поиск и команда</span>
               <span className="hidden sm:inline-flex items-center gap-0.5 font-mono text-xs text-[var(--text-muted)]">
                 <Command className="w-3 h-3" strokeWidth={1.75} />K
               </span>
             </button>
 
-            {/* Real Storage / Sync Status Indicator */}
             <button
               type="button"
               onClick={() => {
                 setSettingsSubTab('integrations');
                 setActiveTab('settings');
               }}
-              title={`Режим хранения: ${syncDisplay.label} · Версия синка #${state.revision}`}
-              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-[var(--border-subtle)] text-xs font-medium whitespace-nowrap transition-colors hover:border-[var(--border-strong)]"
+              title={`Хранилище: ${syncDisplay.label} · Версия #${state.revision ?? 1}`}
+              className="hidden xl:inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-[var(--border-subtle)] text-xs font-medium whitespace-nowrap transition-colors hover:border-[var(--border-strong)]"
               style={{ backgroundColor: syncDisplay.bg, color: syncDisplay.color }}
             >
               <span
@@ -423,15 +523,14 @@ const OpsWorkspace: React.FC = () => {
               <span>{syncDisplay.label}</span>
             </button>
 
-            {/* Obsidian Dark / Crisp Daylight Theme Toggle */}
+            {/* Mobile/Tablet Night Shift Toggle (desktop toggle lives in sidebar) */}
             <button
               type="button"
               onClick={toggleTheme}
               aria-label={
-                theme === 'dark' ? 'Включить дневную тему' : 'Включить ночную тему'
+                theme === 'dark' ? 'Включить дневной режим' : 'Включить ночную смену'
               }
-              title={theme === 'dark' ? 'Дневная тема (Daylight)' : 'Ночная тема (Obsidian)'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0"
+              className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] transition-colors shrink-0"
             >
               {theme === 'dark' ? (
                 <Sun className="w-4 h-4" strokeWidth={1.75} />
@@ -440,12 +539,12 @@ const OpsWorkspace: React.FC = () => {
               )}
             </button>
 
-            {/* Chrome Side Panel Bridge Toggle (Desktop) */}
+            {/* Bnovo / E-mehmon Side Panel Bridge Toggle */}
             <button
               type="button"
               onClick={() => setSidePanelOpen((v) => !v)}
               aria-label="Открыть или скрыть мост Bnovo и E-mehmon"
-              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap min-h-[38px]"
+              className="hidden lg:inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap"
               style={
                 sidePanelOpen
                   ? {
@@ -460,15 +559,26 @@ const OpsWorkspace: React.FC = () => {
                     }
               }
             >
-              <Chrome className="w-3.5 h-3.5" strokeWidth={1.75} />
+              <Chrome className="w-4 h-4" strokeWidth={1.75} />
               <span>Мост</span>
+            </button>
+
+            {/* Single Primary Workspace CTA */}
+            <button
+              type="button"
+              onClick={() => openCheckInModal()}
+              className="inline-flex items-center gap-1.5 h-10 px-3.5 sm:px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold transition-colors shadow-sm whitespace-nowrap shrink-0"
+            >
+              <Plus className="w-4 h-4 shrink-0" strokeWidth={2} />
+              <span className="hidden sm:inline">Новое заселение</span>
+              <span className="sm:hidden">Заезд</span>
             </button>
           </div>
         </header>
 
-        {/* Contextual "Фокус смены" Priority Strip */}
+        {/* Slim 1-Line Contextual "Фокус смены" Alert Strip */}
         <div
-          className="border-b px-4 sm:px-6 lg:px-8 py-2.5 no-print"
+          className="border-b px-4 sm:px-6 py-2 no-print"
           style={{
             backgroundColor:
               shiftFocus.tone === 'rose'
@@ -484,7 +594,7 @@ const OpsWorkspace: React.FC = () => {
                   : 'var(--tone-emerald-border)',
           }}
         >
-          <div className="max-w-[1220px] mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 min-w-0">
               {shiftFocus.tone === 'rose' ? (
                 <AlertCircle
@@ -506,7 +616,7 @@ const OpsWorkspace: React.FC = () => {
                 />
               )}
               <span
-                className="font-semibold shrink-0"
+                className="font-bold shrink-0"
                 style={{
                   color:
                     shiftFocus.tone === 'rose'
@@ -527,7 +637,7 @@ const OpsWorkspace: React.FC = () => {
               <button
                 type="button"
                 onClick={shiftFocus.onAction}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl font-semibold bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0"
               >
                 <span>{shiftFocus.ctaLabel}</span>
                 <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -537,8 +647,8 @@ const OpsWorkspace: React.FC = () => {
         </div>
 
         {/* Main Content Viewport */}
-        <main className="flex-1 min-w-0 pb-24 lg:pb-10">
-          <div className="max-w-[1220px] mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+        <main className="flex-1 min-w-0 pb-24 lg:pb-8">
+          <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-4 sm:py-5">
             <motion.div
               key={activeTab}
               initial={{ opacity: 0, y: 4 }}
@@ -593,7 +703,7 @@ const OpsWorkspace: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Mobile Fixed 5-Tab Bottom Navigation Bar (< 1024px) with >= 44px tap targets & safe-area */}
+      {/* Mobile Fixed 5-Tab Bottom Navigation Bar (< 1024px) with >= 44px tap targets */}
       <nav
         aria-label="Мобильная навигация"
         className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--bg-surface)]/95 backdrop-blur-md border-t border-[var(--border-subtle)] grid grid-cols-5 px-1 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] no-print"
@@ -607,7 +717,7 @@ const OpsWorkspace: React.FC = () => {
               type="button"
               onClick={() => setActiveTab(item.id)}
               className={`relative flex flex-col items-center justify-center gap-0.5 min-h-[48px] rounded-xl text-xs font-medium transition-colors ${
-                active ? 'text-[#3B82F6] font-semibold' : 'text-[var(--text-muted)]'
+                active ? 'text-[#2563EB] font-semibold' : 'text-[var(--text-muted)]'
               }`}
             >
               <Icon className="w-4 h-4" strokeWidth={1.75} />

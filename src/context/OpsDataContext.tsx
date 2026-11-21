@@ -71,6 +71,11 @@ export interface OpsDataContextValue {
   speedUpLaundry: (jobId: string, minusMinutes?: number) => void;
   maidMarkCleaned: (taskId: string) => void;
   adminApproveHousekeeping: (taskId: string) => void;
+  setRoomHousekeepingStatus: (
+    roomId: string,
+    status: 'available' | 'dirty' | 'maintenance',
+    bedId?: string
+  ) => void;
   addLuggageItem: (params: AddLuggagePayload) => void;
   releaseLuggageItem: (id: string) => void;
   addTransferJob: (params: AddTransferPayload) => void;
@@ -521,6 +526,36 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pushToast]
   );
 
+  const setRoomHousekeepingStatus = useCallback(
+    (roomId: string, status: 'available' | 'dirty' | 'maintenance', bedId?: string) => {
+      const room = stateRef.current.physicalRooms.find((r) => r.id === roomId);
+      if (!room) return;
+      const bed = bedId ? room.beds?.find((b) => b.id === bedId) : undefined;
+      const currentStatus = bed ? bed.status : room.status;
+      if (currentStatus === 'occupied') {
+        pushToast('Номер занят гостем', 'Сначала оформите выезд или переселение гостя', 'amber');
+        return;
+      }
+      dispatch({
+        type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+        payload: { roomId, bedId, status },
+      });
+      const label = bed ? `${room.code} (${bed.label})` : room.code;
+      const statusText =
+        status === 'available'
+          ? 'Чисто · готов к заселению'
+          : status === 'dirty'
+            ? 'Уборка · добавлена задача горничной'
+            : 'Ремонт · снят с продажи';
+      pushToast(
+        `${label}: статус обновлён`,
+        statusText,
+        status === 'available' ? 'emerald' : status === 'dirty' ? 'amber' : 'rose'
+      );
+    },
+    [pushToast]
+  );
+
   const addLuggageItem = useCallback(
     (params: AddLuggagePayload) => {
       const tagCode = `#B${14 + stateRef.current.luggageItems.length}`;
@@ -855,6 +890,7 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       speedUpLaundry,
       maidMarkCleaned,
       adminApproveHousekeeping,
+      setRoomHousekeepingStatus,
       addLuggageItem,
       releaseLuggageItem,
       addTransferJob,
@@ -893,6 +929,7 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       speedUpLaundry,
       maidMarkCleaned,
       adminApproveHousekeeping,
+      setRoomHousekeepingStatus,
       addLuggageItem,
       releaseLuggageItem,
       addTransferJob,

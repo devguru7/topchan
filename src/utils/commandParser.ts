@@ -9,8 +9,8 @@ import { calcChangeUzs, round2 } from './math';
 
 export const COMMAND_PRESETS: string[] = [
   'Смолл 3, Алекс Ким, 2 ночи, дал $50, сдача сумами, быстрая стирка',
-  'Йеллоу 2, Мария Соколова, 3 ночи, дал $100, сдача сумами, поздний завтрак',
-  'Микс 5, Дэвид Ли, 1 ночь, дал $20, сдача сумами, средняя стирка',
+  'Йеллоу 4, Мария Соколова, 3 ночи, дал $100, сдача сумами, поздний завтрак',
+  'Сикс 3, Дэвид Ли, 2 ночи, дал $30, сдача сумами, средняя стирка',
 ];
 
 const ROOM_ALIASES: Array<{ keywords: string[]; categoryMatch: string }> = [
@@ -23,6 +23,7 @@ const ROOM_ALIASES: Array<{ keywords: string[]; categoryMatch: string }> = [
   { keywords: ['грин', 'зеленая', 'зелёная', 'green'], categoryMatch: 'Green' },
   { keywords: ['блю', 'синяя', 'семейная', 'family', 'blue'], categoryMatch: 'Blue (Family)' },
   { keywords: ['микс', 'mix'], categoryMatch: 'Mix Dorm' },
+  { keywords: ['сикс', 'six', 'шестерка', 'шестёрка'], categoryMatch: 'Six Dorm' },
   { keywords: ['фем', 'женский', 'женская', 'fem'], categoryMatch: 'Fem Dorm' },
 ];
 
@@ -42,7 +43,7 @@ export function parseRussianReceptionCommand(
 
   for (const alias of ROOM_ALIASES) {
     for (const kw of alias.keywords) {
-      const regex = new RegExp(`(?:^|[\\s,])${kw}(?:\\s*#?(\\d+))?`, 'i');
+      const regex = new RegExp(`(?:^|[\\s,])${kw}(?:[\\s#-]*(\\d+))?`, 'i');
       const m = lower.match(regex);
       if (m) {
         matchedCategory = categories.find(
@@ -69,7 +70,12 @@ export function parseRussianReceptionCommand(
       matchedRoom = activeRoomsInCat[0];
       if (matchedRoom?.beds?.length) {
         const targetBed =
-          matchedRoom.beds.find((b) => b.label === `#${roomNumber}`) ??
+          matchedRoom.beds.find(
+            (b) =>
+              b.label === `#${roomNumber}` ||
+              b.label.endsWith(`-${roomNumber}`) ||
+              b.id.endsWith(`-bed-${roomNumber}`)
+          ) ??
           matchedRoom.beds.find((b) => b.status === 'available') ??
           matchedRoom.beds[0];
         matchedBedId = targetBed?.id;
@@ -147,7 +153,7 @@ export function parseRussianReceptionCommand(
 
   let guestName = 'Гость (Walk-in)';
   const skipPattern =
-    /(смолл|смол|small|йеллоу|желт|жёлт|yellow|оранж|orange|пинк|розов|pink|виолет|фиолет|violet|ред|красн|red|грин|зелен|зелён|green|блю|син|семейн|blue|микс|mix|фем|женск|fem|\d+\s*(ноч|сут|night)|дал|оплат|сдач|стирк|завтрак|заезд|выезд|\$|€|сум|usd|uzs|eur)/i;
+    /(смолл|смол|small|йеллоу|желт|жёлт|yellow|оранж|orange|пинк|розов|pink|виолет|фиолет|violet|ред|красн|red|грин|зелен|зелён|green|блю|син|семейн|blue|микс|mix|сикс|six|шестер|шестёр|фем|женск|fem|\d+\s*(ноч|сут|night)|дал|оплат|сдач|стирк|завтрак|заезд|выезд|\$|€|сум|usd|uzs|eur)/i;
 
   for (const part of parts) {
     if (!skipPattern.test(part) && part.length >= 2) {

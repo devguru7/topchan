@@ -118,9 +118,9 @@ test('Uzbekistan tourist tax respects age < 16 exemption and room count threshol
 
   const seed = createSeedState('2026-11-20');
   const activeRooms = seed.physicalRooms.filter((r) => !r.archived).length;
-  assert.equal(activeRooms, 15);
+  assert.equal(activeRooms, 20);
   const monthlyTax = calcMonthlyTouristTaxUzs(seed.bookings, DEFAULT_BCV_UZS, activeRooms);
-  assert.equal(monthlyTax, 572000 + 10560);
+  assert.equal(monthlyTax, 572000 + 88000 + 10560);
 });
 
 test('FIX 5 regression: parallel multi-room segments do NOT double-count tourist tax nights', () => {
@@ -286,7 +286,7 @@ test('zero-typing Russian command parser handles Small 3 + Alex Kim + $50 + chan
     seed.currency
   );
   assert.equal(cmd.roomId, 'room-small-3');
-  assert.equal(cmd.roomLabel, 'Small #3');
+  assert.equal(cmd.roomLabel, 'Small-3');
   assert.equal(cmd.guestName, 'Алекс Ким');
   assert.equal(cmd.nights, 2);
   assert.equal(cmd.nightlyRateUsd, 18);
@@ -298,4 +298,53 @@ test('zero-typing Russian command parser handles Small 3 + Alex Kim + $50 + chan
   assert.equal(cmd.changeUzs, 141000); // floor(12 * 11800 / 1000) * 1000
   assert.equal(cmd.debtUsd, 0);
 });
+
+test('Topchan v4 inventory matches exact 20 physical rooms (17 private + 3 dorms / 20 dorm beds = 37 bookable units)', () => {
+  const seed = createSeedState('2026-11-20');
+  assert.equal(seed.schemaVersion, 4);
+
+  const privateRooms = seed.physicalRooms.filter((r) => !r.beds);
+  const dormRooms = seed.physicalRooms.filter((r) => Boolean(r.beds));
+  const totalDormBeds = dormRooms.reduce((sum, r) => sum + (r.beds?.length ?? 0), 0);
+
+  assert.equal(seed.physicalRooms.length, 20);
+  assert.equal(privateRooms.length, 17);
+  assert.equal(dormRooms.length, 3);
+  assert.equal(totalDormBeds, 20);
+  assert.equal(privateRooms.length + totalDormBeds, 37);
+
+  // Exact category capacities & special attributes
+  const byId = new Map(seed.roomCategories.map((c) => [c.id, c]));
+  assert.equal(byId.get('cat-orange')?.maxOccupancy, 2);
+  assert.equal(byId.get('cat-pink')?.maxOccupancy, 3);
+  assert.equal(byId.get('cat-yellow')?.maxOccupancy, 3);
+  assert.equal(byId.get('cat-green')?.bedType, 'Double (нераздельная кровать)');
+  assert.equal(byId.get('cat-fem-dorm')?.femaleOnly, true);
+
+  // Exact bed counts per dorm
+  assert.equal(seed.physicalRooms.find((r) => r.id === 'room-mix-dorm')?.beds?.length, 10);
+  assert.equal(seed.physicalRooms.find((r) => r.id === 'room-six-dorm')?.beds?.length, 6);
+  assert.equal(seed.physicalRooms.find((r) => r.id === 'room-fem-dorm')?.beds?.length, 4);
+
+  // Command parser recognizes Six Dorm, Yellow-5, Small-6, Mix-10, Fem-4
+  const sixCmd = parseRussianReceptionCommand(
+    'Сикс 3, Дэвид Ли, 2 ночи, дал $30, сдача сумами',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(sixCmd.roomId, 'room-six-dorm');
+  assert.equal(sixCmd.bedId, 'six-bed-3');
+  assert.equal(sixCmd.nightlyRateUsd, 12);
+
+  const yellow5Cmd = parseRussianReceptionCommand(
+    'Yellow-5, Анна Иванова, 1 ночь, дал $24',
+    seed.physicalRooms,
+    seed.roomCategories,
+    seed.currency
+  );
+  assert.equal(yellow5Cmd.roomId, 'room-yellow-5');
+  assert.equal(yellow5Cmd.roomLabel, 'Yellow-5');
+});
+
 

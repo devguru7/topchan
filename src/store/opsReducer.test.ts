@@ -476,3 +476,65 @@ test('FIX 3 regression: checkout works with overpayment, supports refund, enforc
     'reception role must not be allowed to override unpaid debt at checkout'
   );
 });
+
+test('inline SET_ROOM_HOUSEKEEPING_STATUS toggles room & dorm bed cleanliness, syncs HK tasks, and blocks occupied units', () => {
+  const BASE_DATE = '2026-11-20';
+  let state = createSeedState(BASE_DATE);
+
+  // 1. Occupied room (Small-1) MUST NOT be overwritten to dirty/maintenance
+  const revBeforeOccupied = state.revision;
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    payload: { roomId: 'room-small-1', status: 'dirty' },
+  });
+  assert.equal(state.revision, revBeforeOccupied);
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-small-1')?.status, 'occupied');
+
+  // 2. Unoccupied room (Yellow-4) available -> dirty creates HK task -> maintenance -> available approves HK task
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    nowIso: '2026-11-20T10:00:00+05:00',
+    payload: { roomId: 'room-yellow-4', status: 'dirty' },
+  });
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-yellow-4')?.status, 'dirty');
+  assert.ok(
+    state.housekeepingTasks.some((t) => t.roomId === 'room-yellow-4' && t.status === 'dirty')
+  );
+
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    payload: { roomId: 'room-yellow-4', status: 'maintenance' },
+  });
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-yellow-4')?.status, 'maintenance');
+
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    payload: { roomId: 'room-yellow-4', status: 'available' },
+  });
+  assert.equal(state.physicalRooms.find((r) => r.id === 'room-yellow-4')?.status, 'available');
+  assert.ok(
+    state.housekeepingTasks.every(
+      (t) => t.roomId !== 'room-yellow-4' || t.status === 'approved'
+    )
+  );
+
+  // 3. Dorm bed inline toggle works on unoccupied Six-3, blocked on occupied Six-2
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    payload: { roomId: 'room-six-dorm', bedId: 'six-bed-3', status: 'dirty' },
+  });
+  assert.equal(
+    state.physicalRooms
+      .find((r) => r.id === 'room-six-dorm')
+      ?.beds?.find((b) => b.id === 'six-bed-3')?.status,
+    'dirty'
+  );
+
+  const revBeforeOccupiedBed = state.revision;
+  state = opsReducer(state, {
+    type: 'SET_ROOM_HOUSEKEEPING_STATUS',
+    payload: { roomId: 'room-six-dorm', bedId: 'six-bed-2', status: 'available' },
+  });
+  assert.equal(state.revision, revBeforeOccupiedBed);
+});
+

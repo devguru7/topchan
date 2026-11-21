@@ -609,53 +609,77 @@ export const CashTab: React.FC = () => {
                 description="Новые приходы, сдачи, хозрасходы и инкассации появятся здесь сразу после проведения."
               />
             ) : (
-              <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-2xl bg-[var(--bg-elevated)] overflow-hidden">
-                {filteredTx.map((tx) => {
-                  const pocket = state.pockets.find((p) => p.id === tx.pocketId);
-                  return (
-                    <div
-                      key={tx.id}
-                      className="px-4 py-3 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        {tx.direction === 'in' ? (
-                          <ArrowDownLeft
-                            className="w-4 h-4 shrink-0"
-                            strokeWidth={1.75}
-                            style={{ color: 'var(--tone-emerald-fg)' }}
-                          />
-                        ) : (
-                          <ArrowUpRight
-                            className="w-4 h-4 shrink-0"
-                            strokeWidth={1.75}
-                            style={{ color: 'var(--tone-rose-fg)' }}
-                          />
-                        )}
-                        <div className="min-w-0">
-                          <div className="text-[var(--text-primary)] font-medium truncate">
-                            {tx.label}
-                          </div>
-                          <div className="text-[var(--text-muted)]">
-                            {pocket?.name} · {tx.actor}
-                            {tx.receiptVerified ? ' · Чек проверен' : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="font-mono tabular-nums font-semibold shrink-0"
-                        style={{
-                          color:
-                            tx.direction === 'in'
-                              ? 'var(--tone-emerald-fg)'
-                              : 'var(--tone-rose-fg)',
-                        }}
-                      >
-                        {tx.direction === 'in' ? '+' : '−'}
-                        {formatPocketBalance(tx.currency, tx.amount)}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="overflow-x-auto border border-[var(--border-subtle)] rounded-xl">
+                <table className="w-full text-left border-collapse min-w-[640px]">
+                  <thead>
+                    <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-strong)] text-xs font-semibold text-[var(--text-secondary)]">
+                      <th className="py-2.5 px-3.5 whitespace-nowrap">Тип</th>
+                      <th className="py-2.5 px-3.5 whitespace-nowrap">Описание операции</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Карман</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Дежурный</th>
+                      <th className="py-2.5 px-3.5 whitespace-nowrap text-right">Сумма</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-subtle)] text-xs bg-[var(--bg-surface)]">
+                    {filteredTx.map((tx) => {
+                      const pocket = state.pockets.find((p) => p.id === tx.pocketId);
+                      return (
+                        <tr key={tx.id} className="hover:bg-[var(--bg-hover)]/50 transition-colors">
+                          <td className="py-2.5 px-3.5 whitespace-nowrap">
+                            {tx.direction === 'in' ? (
+                              <span
+                                className="inline-flex items-center gap-1 font-semibold"
+                                style={{ color: 'var(--tone-emerald-fg)' }}
+                              >
+                                <ArrowDownLeft className="w-3.5 h-3.5" strokeWidth={2} />
+                                Приход
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 font-semibold"
+                                style={{ color: 'var(--tone-rose-fg)' }}
+                              >
+                                <ArrowUpRight className="w-3.5 h-3.5" strokeWidth={2} />
+                                Расход
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3.5">
+                            <div className="text-[var(--text-primary)] font-medium">
+                              {tx.label}
+                            </div>
+                            {tx.receiptVerified && (
+                              <span
+                                className="text-xs font-medium"
+                                style={{ color: 'var(--tone-emerald-fg)' }}
+                              >
+                                Чек проверен
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap text-[var(--text-secondary)]">
+                            {pocket?.name ?? tx.pocketId}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap text-[var(--text-muted)]">
+                            {tx.actor}
+                          </td>
+                          <td
+                            className="py-2.5 px-3.5 whitespace-nowrap text-right font-mono tabular-nums font-bold"
+                            style={{
+                              color:
+                                tx.direction === 'in'
+                                  ? 'var(--tone-emerald-fg)'
+                                  : 'var(--tone-rose-fg)',
+                            }}
+                          >
+                            {tx.direction === 'in' ? '+' : '−'}
+                            {formatPocketBalance(tx.currency, tx.amount)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

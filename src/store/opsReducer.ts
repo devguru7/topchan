@@ -26,6 +26,7 @@ import {
   handleMaidMarkCleaned,
   handleReleaseLuggage,
   handleResolveTelegramAlert,
+  handleSetRoomHousekeepingStatus,
   handleSpeedUpLaundry,
   handleStartLaundry,
   handleSubmitGuestQrRequest,
@@ -83,6 +84,8 @@ function applyAction(state: AppState, action: OpsAction): AppState {
       return handleMaidMarkCleaned(state, action.payload, action.timeHm);
     case 'ADMIN_APPROVE_HOUSEKEEPING':
       return handleAdminApproveHousekeeping(state, action.payload);
+    case 'SET_ROOM_HOUSEKEEPING_STATUS':
+      return handleSetRoomHousekeepingStatus(state, action.payload, action.nowIso);
     case 'ADD_LUGGAGE':
       return handleAddLuggage(state, action.payload, action.nowIso);
     case 'RELEASE_LUGGAGE':

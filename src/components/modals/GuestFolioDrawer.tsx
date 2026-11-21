@@ -42,6 +42,7 @@ export const GuestFolioDrawer: React.FC = () => {
     addLedgerCharge,
     addPayment,
     extendOrMoveStay,
+    markGuestEmehmonRegistered,
     openCheckOutModal,
   } = useOps();
 
@@ -418,10 +419,19 @@ export const GuestFolioDrawer: React.FC = () => {
                           {guest.citizenship} · {guest.passportNo} · ДР {guest.dob}
                         </div>
                       </div>
-                      <div className="text-right text-xs shrink-0 space-y-1">
-                        <StatusPill tone={guest.emehmonRegistered ? 'emerald' : 'amber'}>
+                      <div className="text-right text-xs shrink-0 space-y-1.5 flex flex-col items-end">
+                        <StatusPill tone={guest.emehmonRegistered ? 'emerald' : 'rose'}>
                           {guest.emehmonRegistered ? 'E-mehmon ✓' : 'Нет E-mehmon'}
                         </StatusPill>
+                        {!guest.emehmonRegistered && (
+                          <button
+                            type="button"
+                            onClick={() => markGuestEmehmonRegistered(booking.id, guest.id)}
+                            className="px-2 py-1 rounded-md bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors"
+                          >
+                            Оформить E-mehmon
+                          </button>
+                        )}
                         <div className="text-[var(--text-muted)]">
                           {guest.keyIssued ? 'Ключ на руках' : 'Без ключа'}
                         </div>
