@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   calcAccommodationUzs,
   calcBookingTotals,
+  calcBookingTouristTaxUzs,
   calcChangeUzs,
   calcDefaultAccRate,
   calcDefaultExRate,
@@ -27,6 +28,7 @@ import {
   hasDateOverlap,
 } from './availability';
 import { createSeedState, FALLBACK_CBU_USD, DEFAULT_BCV_UZS } from '../data/seed';
+import { parseSafeAmount } from '../../server/bnovo';
 
 test('default Acc and Ex rates derive accurately from CBU USD', () => {
   assert.equal(calcDefaultAccRate(FALLBACK_CBU_USD), 12200);
@@ -55,6 +57,49 @@ test('dual-rate change calculator computes exact UZS change when guest overpays 
   assert.equal(res.changeUzs, 141000);
 });
 
+test('FIX 4 regression: same-currency UZS payment gives zero-spread exact change and exact billUzs yields zero overpayment', () => {
+  // Bill $18 @ Acc 12200 -> billUzs = 220,000. Paying 500,000 UZS -> exact 280,000 UZS change (not 270,000)
+  const overpaid = calcDualRateChange({
+    billUsd: 18,
+    receivedCurrency: 'UZS',
+    receivedAmount: 500000,
+    accRate: 12200,
+    exRate: 11800,
+    cbuUsd: 12004.48,
+    cbuEur: 13280.68,
+  });
+  assert.equal(overpaid.billUzs, 220000);
+  assert.equal(overpaid.changeUzs, 280000);
+  assert.equal(overpaid.underpaidUsd, 0);
+
+  // Paying exact billUzs (220,000) must yield zero overpayment and zero change
+  const exact = calcDualRateChange({
+    billUsd: 18,
+    receivedCurrency: 'UZS',
+    receivedAmount: 220000,
+    accRate: 12200,
+    exRate: 11800,
+    cbuUsd: 12004.48,
+    cbuEur: 13280.68,
+  });
+  assert.equal(exact.overpaidUsd, 0);
+  assert.equal(exact.underpaidUsd, 0);
+  assert.equal(exact.changeUzs, 0);
+
+  // Zero-division guard: zero rates never return NaN/Infinity
+  const zeroRate = calcDualRateChange({
+    billUsd: 18,
+    receivedCurrency: 'EUR',
+    receivedAmount: 20,
+    accRate: 0,
+    exRate: 0,
+    cbuUsd: 0,
+    cbuEur: 0,
+  });
+  assert.equal(Number.isFinite(zeroRate.receivedUsdEquivalent), true);
+  assert.equal(Number.isFinite(zeroRate.changeUzs), true);
+});
+
 test('debt is computed strictly from immutable ledger entries', () => {
   const seed = createSeedState('2026-11-20');
   const yellow = seed.bookings.find((b) => b.id === 'bkg-yellow-1')!;
@@ -76,6 +121,71 @@ test('Uzbekistan tourist tax respects age < 16 exemption and room count threshol
   assert.equal(activeRooms, 15);
   const monthlyTax = calcMonthlyTouristTaxUzs(seed.bookings, DEFAULT_BCV_UZS, activeRooms);
   assert.equal(monthlyTax, 572000 + 10560);
+});
+
+test('FIX 5 regression: parallel multi-room segments do NOT double-count tourist tax nights', () => {
+  const seed = createSeedState('2026-11-20');
+  const template = seed.bookings[0];
+  // 2 rooms booked in parallel for the SAME 2 nights (2026-11-20 -> 2026-11-22) with 1 adult foreigner
+  const parallelBooking = {
+    ...template,
+    id: 'bkg-parallel-test',
+    guests: [
+      {
+        ...template.guests[0],
+        id: 'gst-parallel-1',
+        age: 31,
+        isForeigner: true,
+      },
+    ],
+    segments: [
+      {
+        id: 'seg-a',
+        roomId: 'room-small-3',
+        fromDate: '2026-11-20',
+        toDate: '2026-11-22',
+        nights: 2,
+        nightlyRateUsd: 18,
+      },
+      {
+        id: 'seg-b',
+        roomId: 'room-small-4',
+        fromDate: '2026-11-20',
+        toDate: '2026-11-22',
+        nights: 2,
+        nightlyRateUsd: 18,
+      },
+    ],
+  };
+
+  // At 15 rooms, daily tax = 44,000 UZS. 2 unique nights = 88,000 UZS (NOT 176,000!)
+  assert.equal(calcBookingTouristTaxUzs(parallelBooking, DEFAULT_BCV_UZS, 15), 88000);
+
+  // Zero-night booking yields 0 tax
+  const zeroNightBooking = {
+    ...parallelBooking,
+    segments: [
+      {
+        id: 'seg-zero',
+        roomId: 'room-small-3',
+        fromDate: '2026-11-20',
+        toDate: '2026-11-20',
+        nights: 0,
+        nightlyRateUsd: 18,
+      },
+    ],
+  };
+  assert.equal(calcBookingTouristTaxUzs(zeroNightBooking, DEFAULT_BCV_UZS, 15), 0);
+});
+
+test('FIX 9 regression: parseSafeAmount parses European comma decimals and never returns NaN', () => {
+  assert.equal(parseSafeAmount('100,50'), 100.5);
+  assert.equal(parseSafeAmount('1 250,75 USD'), 1250.75);
+  assert.equal(parseSafeAmount('1,250.50'), 1250.5);
+  assert.equal(parseSafeAmount(42.25), 42.25);
+  assert.equal(parseSafeAmount('invalid'), 0);
+  assert.equal(parseSafeAmount(null), 0);
+  assert.equal(parseSafeAmount(Number.NaN), 0);
 });
 
 test('denomination counter sums UZS and USD bills accurately', () => {
@@ -188,3 +298,4 @@ test('zero-typing Russian command parser handles Small 3 + Alex Kim + $50 + chan
   assert.equal(cmd.changeUzs, 141000); // floor(12 * 11800 / 1000) * 1000
   assert.equal(cmd.debtUsd, 0);
 });
+

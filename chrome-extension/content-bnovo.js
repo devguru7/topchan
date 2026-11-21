@@ -1,56 +1,123 @@
 // Topchan Ops — Bnovo PMS Content Script
-// Reads active booking details (guest name, dates, category, balance, booking number) safely from Bnovo DOM.
+// Reads active booking details (including form input .value and parsed check-in/out dates) safely from Bnovo DOM.
 
 (function () {
-  function pickText(selectors) {
+  function readElementTextOrValue(el) {
+    if (!el) return '';
+    if (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      el instanceof HTMLSelectElement
+    ) {
+      return String(el.value || '').trim();
+    }
+    return String(el.textContent || '').trim();
+  }
+
+  function pickField(selectors) {
     for (const sel of selectors) {
       const el = document.querySelector(sel);
-      if (el && el.textContent && el.textContent.trim()) {
-        return el.textContent.trim();
-      }
+      const val = readElementTextOrValue(el);
+      if (val) return val;
     }
     return '';
   }
 
+  function normalizeDateToken(token) {
+    if (!token) return '';
+    // YYYY-MM-DD
+    const iso = token.match(/^(\d{4})[-/.](\d{2})[-/.](\d{2})$/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    // DD.MM.YYYY or DD/MM/YYYY
+    const dmy = token.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+    if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    return '';
+  }
+
+  function parseStayDates(raw) {
+    if (!raw) return { checkInDate: '', checkOutDate: '' };
+    const tokens = raw.match(/\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[./-]\d{2}[./-]\d{4}/g) || [];
+    const normalized = tokens.map(normalizeDateToken).filter(Boolean);
+    return {
+      checkInDate: normalized[0] || '',
+      checkOutDate: normalized[1] || '',
+    };
+  }
+
   function scrapeBnovoBooking() {
     const guestName =
-      pickText([
+      pickField([
         '[data-testid="guest-name"]',
         '.booking-customer-name',
         '.customer-name',
         'input[name="customer_name"]',
+        'input[name*="guest_name" i]',
         'h1',
       ]) || document.title;
 
-    const bookingNumber = pickText([
+    const bookingNumber = pickField([
       '[data-testid="booking-number"]',
       '.booking-number',
       '.booking-header__number',
+      'input[name="booking_number"]',
     ]);
 
-    const datesRaw = pickText([
+    const datesRaw = pickField([
       '[data-testid="booking-dates"]',
       '.booking-dates',
       '.stay-dates',
     ]);
 
-    const category = pickText([
+    const explicitArrival = normalizeDateToken(
+      pickField([
+        'input[name*="arrival" i]',
+        'input[name*="checkin" i]',
+        'input[name*="date_from" i]',
+      ])
+    );
+    const explicitDeparture = normalizeDateToken(
+      pickField([
+        'input[name*="departure" i]',
+        'input[name*="checkout" i]',
+        'input[name*="date_to" i]',
+      ])
+    );
+    const parsedRange = parseStayDates(datesRaw);
+    const checkInDate = explicitArrival || parsedRange.checkInDate;
+    const checkOutDate = explicitDeparture || parsedRange.checkOutDate;
+
+    const category = pickField([
       '[data-testid="room-category"]',
       '.booking-room-type',
       '.room-type-name',
     ]);
 
-    const balanceRaw = pickText([
+    const balanceRaw = pickField([
       '[data-testid="booking-balance"]',
       '.booking-balance',
       '.booking-total',
     ]);
 
-    const passportInput = document.querySelector(
-      'input[name*="passport" i], input[placeholder*="паспорт" i]'
+    const passportNo = pickField([
+      'input[name*="passport" i]',
+      'input[placeholder*="паспорт" i]',
+      '[data-testid="guest-passport"]',
+    ]);
+
+    const citizenship = pickField([
+      'input[name*="citizen" i]',
+      'select[name*="citizen" i]',
+      'input[name*="country" i]',
+      '[data-testid="guest-citizenship"]',
+    ]);
+
+    const dob = normalizeDateToken(
+      pickField([
+        'input[name*="birth" i]',
+        'input[name*="dob" i]',
+        '[data-testid="guest-dob"]',
+      ])
     );
-    const passportNo =
-      passportInput && 'value' in passportInput ? String(passportInput.value || '').trim() : '';
 
     const parts = guestName.replace(/\s+/g, ' ').trim().split(' ');
     const surname = parts[0] || '';
@@ -64,7 +131,11 @@
       surname,
       givenName,
       passportNo,
-      datesRaw: datesRaw || 'Сегодня',
+      citizenship,
+      dob,
+      checkInDate,
+      checkOutDate,
+      datesRaw: datesRaw || (checkInDate && checkOutDate ? `${checkInDate} → ${checkOutDate}` : ''),
       category: category || 'Small',
       balanceRaw: balanceRaw || '$0',
     };

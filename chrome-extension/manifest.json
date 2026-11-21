@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Topchan Ops — Мост Bnovo и E-mehmon",
-  "version": "1.0.0",
-  "description": "Боковая панель администратора Topchan Hostel (Ташкент): чтение броней из Bnovo PMS и автозаполнение регистрации гостей в E-mehmon в 1 клик.",
-  "permissions": ["sidePanel", "activeTab", "storage", "scripting"],
+  "version": "1.1.0",
+  "description": "Боковая панель администратора Topchan Hostel (Ташкент): чтение броней из Bnovo PMS и автозаполнение регистрации гостей в E-mehmon в 1 клик с автоочисткой ПДн.",
+  "permissions": ["sidePanel", "activeTab", "storage", "scripting", "alarms"],
   "host_permissions": [
     "https://*.bnovo.ru/*",
-    "https://*.emehmon.uz/*",
-    "http://localhost:3000/*"
+    "https://*.emehmon.uz/*"
   ],
   "background": {
     "service_worker": "background.js",

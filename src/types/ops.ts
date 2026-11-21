@@ -20,6 +20,8 @@ export type TransferStatus = 'assigned' | 'en_route' | 'picked_up';
 
 export type GuestLang = 'ru' | 'en' | 'uz' | 'zh';
 
+export type AdminRole = 'owner' | 'senior_admin' | 'reception';
+
 export interface RoomCategory {
   id: string;
   propertyId: string;
@@ -75,6 +77,7 @@ export interface StayGuest {
   emehmonCheckedOut: boolean;
   registrationSlipPrinted: boolean;
   keyIssued: boolean;
+  segmentId?: string;
 }
 
 export interface LedgerEntry {
@@ -126,12 +129,19 @@ export interface GuestProfile {
   lastVisitDate: string;
 }
 
+export interface SafeCurrencyBreakdown {
+  UZS: number;
+  USD: number;
+  EUR: number;
+}
+
 export interface CashPocket {
   id: CashPocketId;
   propertyId: string;
   name: string;
   currency: CurrencyCode;
   balance: number;
+  safeBalances?: SafeCurrencyBreakdown;
   description: string;
 }
 
@@ -302,8 +312,10 @@ export interface IntegrationSettings {
 
 export interface AppState {
   schemaVersion: number;
+  revision?: number;
   propertyId: string;
   adminName: string;
+  adminRole?: AdminRole;
   roomCategories: RoomCategory[];
   physicalRooms: PhysicalRoom[];
   bookings: BookingGroup[];

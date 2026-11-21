@@ -83,6 +83,11 @@
         color: #e2e8f0;
         border: 1px solid rgba(255, 255, 255, 0.08);
       }
+      .btn-rose {
+        background: rgba(244, 63, 94, 0.15);
+        color: #fda4af;
+        border: 1px solid rgba(244, 63, 94, 0.35);
+      }
       .status {
         margin-top: 10px;
         padding: 9px 10px;
@@ -105,7 +110,7 @@
   <body>
     <div class="card">
       <h1>Topchan Ops Bridge</h1>
-      <div class="sub">Bnovo PMS ↔ E-mehmon.uz (Ташкент)</div>
+      <div class="sub">Bnovo PMS ↔ E-mehmon.uz (Ташкент · автоочистка ПДн через 60с)</div>
       <button id="btnScrapeBnovo" type="button" class="btn-blue">
         1. Считать бронь из Bnovo
       </button>
@@ -135,22 +140,29 @@
           <input id="fPassport" type="text" placeholder="YA4829103" />
         </div>
         <div>
-          <label for="fDob">Дата рождения</label>
-          <input id="fDob" type="text" placeholder="1991-06-15" />
+          <label for="fCitizenship">Гражданство (ISO)</label>
+          <input id="fCitizenship" type="text" placeholder="ITA" />
         </div>
       </div>
       <div class="row">
         <div>
+          <label for="fDob">Дата рождения</label>
+          <input id="fDob" type="text" placeholder="1991-06-15" />
+        </div>
+        <div>
           <label for="fCheckIn">Заезд</label>
           <input id="fCheckIn" type="text" placeholder="YYYY-MM-DD" />
         </div>
-        <div>
-          <label for="fCheckOut">Выезд</label>
-          <input id="fCheckOut" type="text" placeholder="YYYY-MM-DD" />
-        </div>
+      </div>
+      <div>
+        <label for="fCheckOut">Выезд</label>
+        <input id="fCheckOut" type="text" placeholder="YYYY-MM-DD" />
       </div>
       <button id="btnSaveDraft" type="button" class="btn-ghost">
         Сохранить карточку в буфер моста
+      </button>
+      <button id="btnClearPii" type="button" class="btn-rose">
+        Очистить паспортные данные
       </button>
     </div>
 

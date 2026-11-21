@@ -2,10 +2,11 @@ import type {
   AppState,
   BookingGroup,
   CashPocketId,
+  CurrencyCode,
   LedgerEntry,
   ParsedCommand,
 } from '../../types/ops';
-import { calcBookingTotals, formatUsd, round2 } from '../../utils/math';
+import { calcBookingTotals, formatUsd, formatUzs, round2 } from '../../utils/math';
 import { addDaysIso, formatTashkentHm, getTashkentTodayIso } from '../../utils/time';
 import { findRoomConflicts } from '../../utils/availability';
 import {
@@ -14,7 +15,79 @@ import {
   type CheckInPayload,
   type CheckOutPayload,
   type ExtendOrMovePayload,
+  type IssueRefundPayload,
 } from '../types';
+
+export function isPocketCurrencyMatch(pocketId: CashPocketId, currency: CurrencyCode): boolean {
+  if (pocketId === 'safe') return false;
+  if (pocketId === 'cash_usd') return currency === 'USD';
+  if (pocketId === 'cash_eur') return currency === 'EUR';
+  if (pocketId === 'cash_uzs' || pocketId === 'terminal' || pocketId === 'transfer') {
+    return currency === 'UZS';
+  }
+  return false;
+}
+
+export function validateGuestPayment(
+  state: AppState,
+  pocketId: CashPocketId,
+  currency: CurrencyCode,
+  originalAmount: number,
+  changeUzsOut = 0
+): string | null {
+  if (pocketId === 'safe') {
+    return 'Карман «Сейф» предназначен только для инкассации, а не для оплаты гостя.';
+  }
+  if (!isPocketCurrencyMatch(pocketId, currency)) {
+    return `Валюта ${currency} не соответствует выбранному карману кассы.`;
+  }
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) {
+    return 'Сумма оплаты должна быть больше нуля.';
+  }
+  const cleanChange = Math.max(0, Math.round(changeUzsOut));
+  if (cleanChange > 0 && (pocketId === 'terminal' || pocketId === 'transfer')) {
+    return 'Выдача наличной сдачи UZS невозможна при безналичной оплате (терминал/перевод).';
+  }
+  if (cleanChange > 0) {
+    const uzsPocket = state.pockets.find((p) => p.id === 'cash_uzs');
+    const availableUzs =
+      (uzsPocket?.balance ?? 0) + (pocketId === 'cash_uzs' ? Math.round(originalAmount) : 0);
+    if (cleanChange > availableUzs) {
+      return `Недостаточно UZS в ящике ресепшн для выдачи сдачи (${formatUzs(cleanChange)} > ${formatUzs(availableUzs)}).`;
+    }
+  }
+  return null;
+}
+
+export function validateCheckOutGuards(
+  state: AppState,
+  payload: CheckOutPayload
+): string | null {
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId);
+  if (!bkg || bkg.status !== 'active') {
+    return 'Бронь не найдена или уже закрыта.';
+  }
+  const financials = calcBookingTotals(bkg);
+  const role = payload.actorRole ?? state.adminRole ?? 'senior_admin';
+
+  if (financials.debtUsd > 0) {
+    if (role !== 'owner' && role !== 'senior_admin') {
+      return 'Закрытие с неоплаченным долгом доступно только старшему администратору или владельцу.';
+    }
+    if (!payload.debtOverrideReason || payload.debtOverrideReason.trim().length < 8) {
+      return 'Для выселения с долгом укажите подробную причину (минимум 8 символов) для аудит-лога.';
+    }
+  }
+
+  const unregisteredForeigner = bkg.guests.find((g) => g.isForeigner && !g.emehmonRegistered);
+  if (unregisteredForeigner) {
+    if (!payload.emehmonOverrideReason || payload.emehmonOverrideReason.trim().length < 8) {
+      return `Иностранный гость ${unregisteredForeigner.fullName} не зарегистрирован в E-mehmon. Оформите регистрацию или укажите причину исключения (минимум 8 символов).`;
+    }
+  }
+
+  return null;
+}
 
 export function handleCheckIn(
   state: AppState,
@@ -58,27 +131,76 @@ export function handleCheckIn(
     },
   ];
 
-  const nextPockets = state.pockets.map((p) => ({ ...p }));
+  const changeUzsOut = Math.max(0, Math.round(payload.changeUzsOut ?? 0));
+
+  if (payload.initialPayment && payload.initialPayment.originalAmount > 0) {
+    const pay = payload.initialPayment;
+    const payError = validateGuestPayment(
+      state,
+      pay.pocketId,
+      pay.originalCurrency,
+      pay.originalAmount,
+      changeUzsOut
+    );
+    if (payError) {
+      return state;
+    }
+  } else if (changeUzsOut > 0) {
+    // Cannot dispense change without an initial payment
+    return state;
+  }
+
+  const nextPockets = state.pockets.map((p) => {
+    const pay = payload.initialPayment;
+    const added =
+      pay && pay.originalAmount > 0 && p.id === pay.pocketId ? pay.originalAmount : 0;
+    const changeDeducted = p.id === 'cash_uzs' ? changeUzsOut : 0;
+    if (added === 0 && changeDeducted === 0) return p;
+    const nextBalance =
+      p.currency === 'UZS'
+        ? Math.round(p.balance + added - changeDeducted)
+        : round2(p.balance + added - changeDeducted);
+    return { ...p, balance: nextBalance };
+  });
+
   const nextTransactions = [...state.transactions];
 
   if (payload.initialPayment && payload.initialPayment.originalAmount > 0) {
     const pay = payload.initialPayment;
+    // Net effective folio payment so returning cash change never produces fake overpayment
+    let effectivePaymentUsd = round2(pay.amountUsdEquivalent);
+    if (changeUzsOut > 0) {
+      if (effectivePaymentUsd > stayUsd) {
+        effectivePaymentUsd = stayUsd;
+      } else if (pay.originalCurrency === 'UZS' && state.currency.accRate > 0) {
+        effectivePaymentUsd = Math.max(
+          0,
+          round2((pay.originalAmount - changeUzsOut) / state.currency.accRate)
+        );
+      } else if (state.currency.exRate > 0) {
+        effectivePaymentUsd = Math.max(
+          0,
+          round2(effectivePaymentUsd - changeUzsOut / state.currency.exRate)
+        );
+      }
+    }
+
     ledgerEntries.push({
       id: makeId('led'),
       timestamp: nowIso,
       type: 'payment',
       category: 'payment',
-      label: `Оплата при заезде (${pay.originalCurrency})`,
-      amountUsd: round2(pay.amountUsdEquivalent),
+      label:
+        changeUzsOut > 0
+          ? `Оплата при заезде (${pay.originalCurrency}, сдача ${formatUzs(changeUzsOut)})`
+          : `Оплата при заезде (${pay.originalCurrency})`,
+      amountUsd: effectivePaymentUsd,
       originalCurrency: pay.originalCurrency,
       originalAmount: pay.originalAmount,
       pocketId: pay.pocketId,
       actor: state.adminName,
     });
-    const pocket = nextPockets.find((p) => p.id === pay.pocketId);
-    if (pocket) {
-      pocket.balance = round2(pocket.balance + pay.originalAmount);
-    }
+
     nextTransactions.unshift({
       id: makeId('tx'),
       propertyId: state.propertyId,
@@ -94,11 +216,7 @@ export function handleCheckIn(
     });
   }
 
-  if (payload.changeUzsOut && payload.changeUzsOut > 0) {
-    const uzsPocket = nextPockets.find((p) => p.id === 'cash_uzs');
-    if (uzsPocket) {
-      uzsPocket.balance = Math.round(uzsPocket.balance - payload.changeUzsOut);
-    }
+  if (changeUzsOut > 0) {
     nextTransactions.unshift({
       id: makeId('tx'),
       propertyId: state.propertyId,
@@ -106,7 +224,7 @@ export function handleCheckIn(
       pocketId: 'cash_uzs',
       direction: 'out',
       currency: 'UZS',
-      amount: payload.changeUzsOut,
+      amount: changeUzsOut,
       label: `Сдача сумами · ${roomLabel}`,
       bookingId,
       actor: state.adminName,
@@ -289,10 +407,41 @@ export function handleAddPayment(
   const bkg = state.bookings.find((b) => b.id === params.bookingId);
   if (!bkg) return state;
 
+  const changeUzsOut = Math.max(0, Math.round(params.changeUzsOut ?? 0));
+  const payError = validateGuestPayment(
+    state,
+    params.pocketId,
+    params.currency,
+    params.originalAmount,
+    changeUzsOut
+  );
+  if (payError) {
+    return state;
+  }
+
   const lastSeg = bkg.segments[bkg.segments.length - 1];
   const room = state.physicalRooms.find((r) => r.id === lastSeg?.roomId);
   const roomLabel = room?.code ?? 'Номер';
   const pocketName = state.pockets.find((p) => p.id === params.pocketId)?.name ?? params.pocketId;
+
+  // Record net effective payment on folio when cash change is returned so debtUsd stays exact (never fake overpayment)
+  const currentDebt = calcBookingTotals(bkg).debtUsd;
+  let effectivePaymentUsd = round2(params.usdEquivalent);
+  if (changeUzsOut > 0) {
+    if (currentDebt > 0 && effectivePaymentUsd > currentDebt) {
+      effectivePaymentUsd = currentDebt;
+    } else if (params.currency === 'UZS' && state.currency.accRate > 0) {
+      effectivePaymentUsd = Math.max(
+        0,
+        round2((params.originalAmount - changeUzsOut) / state.currency.accRate)
+      );
+    } else if (state.currency.exRate > 0) {
+      effectivePaymentUsd = Math.max(
+        0,
+        round2(effectivePaymentUsd - changeUzsOut / state.currency.exRate)
+      );
+    }
+  }
 
   const nextBookings = state.bookings.map((b) =>
     b.id === params.bookingId
@@ -305,8 +454,11 @@ export function handleAddPayment(
               timestamp: nowIso,
               type: 'payment' as const,
               category: 'payment' as const,
-              label: `Оплата: ${pocketName}`,
-              amountUsd: round2(params.usdEquivalent),
+              label:
+                changeUzsOut > 0
+                  ? `Оплата: ${pocketName} (сдача ${formatUzs(changeUzsOut)})`
+                  : `Оплата: ${pocketName}`,
+              amountUsd: effectivePaymentUsd,
               originalCurrency: params.currency,
               originalAmount: params.originalAmount,
               pocketId: params.pocketId,
@@ -317,14 +469,16 @@ export function handleAddPayment(
       : b
   );
 
+  // Single-pass pocket balance computation (handles cash_uzs + changeUzsOut simultaneously!)
   const nextPockets = state.pockets.map((p) => {
-    if (p.id === params.pocketId) {
-      return { ...p, balance: round2(p.balance + params.originalAmount) };
-    }
-    if (params.changeUzsOut && params.changeUzsOut > 0 && p.id === 'cash_uzs') {
-      return { ...p, balance: Math.round(p.balance - params.changeUzsOut) };
-    }
-    return p;
+    const added = p.id === params.pocketId ? params.originalAmount : 0;
+    const changeDeducted = p.id === 'cash_uzs' ? changeUzsOut : 0;
+    if (added === 0 && changeDeducted === 0) return p;
+    const nextBalance =
+      p.currency === 'UZS'
+        ? Math.round(p.balance + added - changeDeducted)
+        : round2(p.balance + added - changeDeducted);
+    return { ...p, balance: nextBalance };
   });
 
   const nextTransactions = [
@@ -344,7 +498,7 @@ export function handleAddPayment(
     ...state.transactions,
   ];
 
-  if (params.changeUzsOut && params.changeUzsOut > 0) {
+  if (changeUzsOut > 0) {
     nextTransactions.unshift({
       id: makeId('tx'),
       propertyId: state.propertyId,
@@ -352,7 +506,7 @@ export function handleAddPayment(
       pocketId: 'cash_uzs',
       direction: 'out',
       currency: 'UZS',
-      amount: params.changeUzsOut,
+      amount: changeUzsOut,
       label: `Сдача сумами · ${roomLabel}`,
       bookingId: params.bookingId,
       actor: state.adminName,
@@ -371,8 +525,95 @@ export function handleAddPayment(
         timestamp: nowIso,
         actor: state.adminName,
         action: 'Оплата в фолио',
-        diff: `+${formatUsd(params.usdEquivalent)} (${pocketName}) · ${roomLabel}`,
+        diff: `+${formatUsd(effectivePaymentUsd)} (${pocketName})${changeUzsOut > 0 ? ` · сдача ${formatUzs(changeUzsOut)}` : ''} · ${roomLabel}`,
         reason: 'Оплата принята и проведена в кассу',
+      },
+      ...state.auditLog,
+    ],
+  };
+}
+
+export function handleIssueRefund(
+  state: AppState,
+  params: IssueRefundPayload,
+  nowIso = new Date().toISOString()
+): AppState {
+  const bkg = state.bookings.find((b) => b.id === params.bookingId);
+  if (!bkg) return state;
+  if (params.amountOriginal <= 0 || params.amountUsd <= 0) return state;
+
+  const pocket = state.pockets.find((p) => p.id === params.pocketId);
+  if (!pocket || pocket.currency !== params.currency || pocket.balance < params.amountOriginal) {
+    return state;
+  }
+
+  const lastSeg = bkg.segments[bkg.segments.length - 1];
+  const room = state.physicalRooms.find((r) => r.id === lastSeg?.roomId);
+  const roomLabel = room?.code ?? 'Номер';
+
+  const nextPockets = state.pockets.map((p) =>
+    p.id === params.pocketId
+      ? {
+          ...p,
+          balance:
+            p.currency === 'UZS'
+              ? Math.round(p.balance - params.amountOriginal)
+              : round2(p.balance - params.amountOriginal),
+        }
+      : p
+  );
+
+  const nextBookings = state.bookings.map((b) =>
+    b.id === params.bookingId
+      ? {
+          ...b,
+          ledgerEntries: [
+            ...b.ledgerEntries,
+            {
+              id: makeId('led'),
+              timestamp: nowIso,
+              type: 'payment' as const,
+              category: 'payment' as const,
+              label: `Возврат переплаты (${params.currency})`,
+              amountUsd: -round2(params.amountUsd),
+              originalCurrency: params.currency,
+              originalAmount: -params.amountOriginal,
+              pocketId: params.pocketId,
+              actor: state.adminName,
+            },
+          ],
+        }
+      : b
+  );
+
+  return {
+    ...state,
+    pockets: nextPockets,
+    bookings: nextBookings,
+    transactions: [
+      {
+        id: makeId('tx'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        pocketId: params.pocketId,
+        direction: 'out',
+        currency: params.currency,
+        amount: params.amountOriginal,
+        label: `Возврат переплаты · ${roomLabel} (${bkg.guests[0]?.fullName ?? 'Гость'})`,
+        bookingId: params.bookingId,
+        actor: state.adminName,
+      },
+      ...state.transactions,
+    ],
+    auditLog: [
+      {
+        id: makeId('aud'),
+        propertyId: state.propertyId,
+        timestamp: nowIso,
+        actor: state.adminName,
+        action: 'Возврат переплаты',
+        diff: `-${formatUsd(params.amountUsd)} (${params.currency}) · ${roomLabel}`,
+        reason: params.reason || 'Возврат остатка гостю при выселении',
       },
       ...state.auditLog,
     ],
@@ -530,29 +771,51 @@ export function handleCheckOut(
   nowIso = new Date().toISOString(),
   timeHm = formatTashkentHm()
 ): AppState {
+  const guardError = validateCheckOutGuards(state, payload);
+  if (guardError) return state;
+
   const bkg = state.bookings.find((b) => b.id === payload.bookingId);
   if (!bkg) return state;
 
-  const lastSeg = bkg.segments[bkg.segments.length - 1];
-  const room = state.physicalRooms.find((r) => r.id === lastSeg?.roomId);
-  const bed = room?.beds?.find((b) => b.id === lastSeg?.bedId);
-  const roomLabel = room ? (bed ? `${room.code} ${bed.label}` : room.code) : 'Номер';
   const primaryGuest = bkg.guests[0]?.fullName ?? 'Гость';
   const financials = calcBookingTotals(bkg);
 
+  // Deduplicate ALL unique rooms/beds across every segment of this booking
+  const uniqueUnits: Array<{ roomId: string; bedId?: string; label: string }> = [];
+  const seenKeys = new Set<string>();
+  for (const seg of bkg.segments) {
+    const key = `${seg.roomId}:${seg.bedId ?? ''}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const r = state.physicalRooms.find((rm) => rm.id === seg.roomId);
+    const b = r?.beds?.find((bd) => bd.id === seg.bedId);
+    const label = r ? (b ? `${r.code} ${b.label}` : r.code) : 'Номер';
+    uniqueUnits.push({ roomId: seg.roomId, bedId: seg.bedId, label });
+  }
+
+  const primaryRoomLabel = uniqueUnits[uniqueUnits.length - 1]?.label ?? 'Номер';
+  const allRoomsSummary = uniqueUnits.map((u) => u.label).join(', ');
+
+  // Mark EVERY occupied room/bed across all segments as 'dirty'
   const nextRooms = state.physicalRooms.map((r) => {
-    if (r.id !== lastSeg?.roomId) return r;
-    if (r.beds && lastSeg?.bedId) {
+    const roomUnits = uniqueUnits.filter((u) => u.roomId === r.id);
+    if (roomUnits.length === 0) return r;
+    if (r.beds && roomUnits.some((u) => u.bedId)) {
+      const dirtyBedIds = new Set(roomUnits.map((u) => u.bedId).filter(Boolean));
       return {
         ...r,
-        beds: r.beds.map((b) =>
-          b.id === lastSeg.bedId ? { ...b, status: 'dirty' as const } : b
+        beds: r.beds.map((bed) =>
+          dirtyBedIds.has(bed.id) ? { ...bed, status: 'dirty' as const } : bed
         ),
       };
     }
     return { ...r, status: 'dirty' as const };
   });
 
+  const emehmonClosedConfirmed = payload.emehmonClosedConfirmed ?? true;
+  const slipPrintedConfirmed = payload.slipPrintedConfirmed ?? true;
+
+  // Never falsely mark an unregistered guest as E-mehmon checked out or slip-printed
   const nextBookings = state.bookings.map((b) =>
     b.id === payload.bookingId
       ? {
@@ -561,27 +824,29 @@ export function handleCheckOut(
           checkingOutToday: false,
           guests: b.guests.map((g) => ({
             ...g,
-            emehmonCheckedOut: true,
-            registrationSlipPrinted: true,
+            emehmonCheckedOut: g.emehmonRegistered ? emehmonClosedConfirmed : false,
+            registrationSlipPrinted: g.emehmonRegistered
+              ? g.registrationSlipPrinted || slipPrintedConfirmed
+              : false,
             keyIssued: false,
           })),
         }
       : b
   );
 
-  const nextHk = [
-    {
-      id: makeId('hk'),
-      propertyId: state.propertyId,
-      roomId: lastSeg?.roomId ?? '',
-      bedId: lastSeg?.bedId,
-      roomLabel,
-      status: 'dirty' as const,
-      createdAt: nowIso,
-      notes: `Выселение: ${primaryGuest}. Требуется уборка и смена белья.`,
-    },
-    ...state.housekeepingTasks,
-  ];
+  // Create housekeeping task for EVERY room/bed vacated in this booking
+  const newHkTasks = uniqueUnits.map((unit) => ({
+    id: makeId('hk'),
+    propertyId: state.propertyId,
+    roomId: unit.roomId,
+    bedId: unit.bedId,
+    roomLabel: unit.label,
+    status: 'dirty' as const,
+    createdAt: nowIso,
+    notes: `Выселение: ${primaryGuest}. Требуется уборка и смена белья.`,
+  }));
+
+  const nextHk = [...newHkTasks, ...state.housekeepingTasks];
 
   let nextLuggage = state.luggageItems;
   if (payload.createLuggage) {
@@ -595,7 +860,7 @@ export function handleCheckOut(
         guestName: primaryGuest,
         bagsCount: Math.max(1, payload.createLuggage.bagsCount),
         flightTime: payload.createLuggage.flightTime || '22:00',
-        notes: payload.createLuggage.notes || `Оставлен при выезде из ${roomLabel}`,
+        notes: payload.createLuggage.notes || `Оставлен при выезде из ${primaryRoomLabel}`,
         status: 'stored' as const,
         createdAt: nowIso,
       },
@@ -610,7 +875,7 @@ export function handleCheckOut(
     source: 'Review Booster' as const,
     severity: 'success' as const,
     title: `Review Booster (2 этапа): ${primaryGuest} выселен`,
-    body: `Гость выехал из ${roomLabel}. Этап 1 — уточните оценку (1–5★) лично, чтобы решить замечания приватно. При 5★ отправьте ссылку Google Maps / Booking.`,
+    body: `Гость выехал из ${allRoomsSummary}. Этап 1 — уточните оценку (1–5★) лично, чтобы решить замечания приватно. При 5★ отправьте ссылку Google Maps / Booking.`,
     draftReply: `Здравствуйте, ${primaryGuest}! Спасибо, что выбрали Topchan Hostel в Ташкенте. Как вам проживание от 1 до 5? Если всё понравилось на 5★, будем очень благодарны за отзыв на Google Maps: https://g.page/r/topchan-hostel-review. Счастливого пути!`,
     resolved: false,
     actions: [
@@ -618,6 +883,10 @@ export function handleCheckOut(
       { id: makeId('act'), label: 'Отправлено', kind: 'dismiss' as const },
     ],
   };
+
+  const reasons: string[] = [];
+  if (payload.debtOverrideReason) reasons.push(`Долг-override: ${payload.debtOverrideReason}`);
+  if (payload.emehmonOverrideReason) reasons.push(`E-mehmon-override: ${payload.emehmonOverrideReason}`);
 
   return {
     ...state,
@@ -632,11 +901,15 @@ export function handleCheckOut(
         propertyId: state.propertyId,
         timestamp: nowIso,
         actor: state.adminName,
-        action: financials.debtUsd > 0 ? 'Выселение с долгом (Override)' : 'Выселение (Check-out)',
-        diff: `${roomLabel} → Уборка · Долг: ${formatUsd(financials.debtUsd)}`,
+        action:
+          financials.debtUsd > 0 || payload.emehmonOverrideReason
+            ? 'Выселение (Override)'
+            : 'Выселение (Check-out)',
+        diff: `${allRoomsSummary} → Уборка · Долг: ${formatUsd(financials.debtUsd)}`,
         reason:
-          payload.debtOverrideReason ||
-          'Стандартный check-out (ключ сдан, Bnovo/E-mehmon закрыты)',
+          reasons.length > 0
+            ? reasons.join(' | ')
+            : 'Стандартный check-out (ключ сдан, Bnovo/E-mehmon закрыты)',
       },
       ...state.auditLog,
     ],

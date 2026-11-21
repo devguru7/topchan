@@ -2,17 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
+  Banknote,
   Briefcase,
   CheckCircle2,
   Copy,
   DoorOpen,
   ShieldAlert,
+  ShieldCheck,
   Star,
   X,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
-import type { GuestLang } from '../../types/ops';
-import { calcBookingTotals, formatUsd } from '../../utils/math';
+import type { AdminRole, GuestLang } from '../../types/ops';
+import { calcBookingTotals, calcChangeUzs, formatUsd, formatUzs } from '../../utils/math';
 
 const REVIEW_STAGE_TEMPLATES: Record<GuestLang, (name: string) => string> = {
   ru: (name) =>
@@ -31,6 +33,8 @@ export const CheckOutModal: React.FC = () => {
     checkOutBookingId,
     closeCheckOutModal,
     checkOut,
+    issueRefund,
+    markGuestEmehmonRegistered,
     setSelectedBookingId,
     pushToast,
   } = useOps();
@@ -47,6 +51,11 @@ export const CheckOutModal: React.FC = () => {
 
   const [overrideDebt, setOverrideDebt] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
+  const [actorRole, setActorRole] = useState<AdminRole>(state.adminRole ?? 'senior_admin');
+
+  const [overrideEmehmon, setOverrideEmehmon] = useState(false);
+  const [emehmonOverrideReason, setEmehmonOverrideReason] = useState('');
+  const [refundCurrency, setRefundCurrency] = useState<'UZS' | 'USD'>('UZS');
 
   const [addLuggage, setAddLuggage] = useState(false);
   const [bagsCount, setBagsCount] = useState(1);
@@ -62,11 +71,15 @@ export const CheckOutModal: React.FC = () => {
     setRoomInspected(false);
     setOverrideDebt(false);
     setOverrideReason('');
+    setActorRole(state.adminRole ?? 'senior_admin');
+    setOverrideEmehmon(false);
+    setEmehmonOverrideReason('');
+    setRefundCurrency('UZS');
     setAddLuggage(false);
     setBagsCount(1);
     setFlightTime('23:40');
     setLuggageNotes('');
-  }, [checkOutBookingId]);
+  }, [checkOutBookingId, state.adminRole]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -84,13 +97,52 @@ export const CheckOutModal: React.FC = () => {
   const roomLabel = room ? (bed ? `${room.code} · Койка ${bed.label}` : room.code) : 'Номер';
 
   const financials = calcBookingTotals(booking);
-  const hasForeigner = booking.guests.some((g) => g.isForeigner);
+  const foreignGuests = booking.guests.filter((g) => g.isForeigner);
+  const hasForeigner = foreignGuests.length > 0;
+  const unregisteredForeigners = foreignGuests.filter((g) => !g.emehmonRegistered);
+
+  const canOverrideDebtRole = actorRole === 'owner' || actorRole === 'senior_admin';
   const debtCleared =
-    financials.debtUsd === 0 || (overrideDebt && overrideReason.trim().length >= 5);
+    financials.debtUsd <= 0 ||
+    (overrideDebt && canOverrideDebtRole && overrideReason.trim().length >= 8);
+
+  const emehmonCleared =
+    unregisteredForeigners.length === 0 ||
+    (overrideEmehmon && emehmonOverrideReason.trim().length >= 8);
+
   const slipSatisfied = !hasForeigner || slipPrinted;
 
   const canComplete =
-    keyReturned && bnovoEmehmonClosed && slipSatisfied && roomInspected && debtCleared;
+    keyReturned &&
+    bnovoEmehmonClosed &&
+    slipSatisfied &&
+    roomInspected &&
+    debtCleared &&
+    emehmonCleared;
+
+  const refundUzsAmount =
+    financials.overpaidUsd > 0 ? calcChangeUzs(financials.overpaidUsd, state.currency.exRate) : 0;
+
+  const handleIssueOverpaymentRefund = () => {
+    if (financials.overpaidUsd <= 0) return;
+    if (refundCurrency === 'UZS') {
+      issueRefund({
+        bookingId: booking.id,
+        pocketId: 'cash_uzs',
+        currency: 'UZS',
+        amountOriginal: refundUzsAmount > 0 ? refundUzsAmount : Math.round(financials.overpaidUsd * state.currency.exRate),
+        amountUsd: financials.overpaidUsd,
+      });
+    } else {
+      issueRefund({
+        bookingId: booking.id,
+        pocketId: 'cash_usd',
+        currency: 'USD',
+        amountOriginal: financials.overpaidUsd,
+        amountUsd: financials.overpaidUsd,
+      });
+    }
+  };
 
   const handleConfirm = () => {
     if (!canComplete) return;
@@ -98,6 +150,13 @@ export const CheckOutModal: React.FC = () => {
       bookingId: booking.id,
       debtOverrideReason:
         financials.debtUsd > 0 && overrideDebt ? overrideReason.trim() : undefined,
+      emehmonOverrideReason:
+        unregisteredForeigners.length > 0 && overrideEmehmon
+          ? emehmonOverrideReason.trim()
+          : undefined,
+      slipPrintedConfirmed: hasForeigner ? slipPrinted : false,
+      emehmonClosedConfirmed: bnovoEmehmonClosed,
+      actorRole,
       createLuggage: addLuggage
         ? {
             bagsCount,
@@ -136,6 +195,9 @@ export const CheckOutModal: React.FC = () => {
                 </h2>
                 <p className="text-xs text-slate-400">
                   {booking.guests.map((g) => g.fullName).join(', ')}
+                  {booking.segments.length > 1
+                    ? ` · ${booking.segments.length} сегмента проживания`
+                    : ''}
                 </p>
               </div>
             </div>
@@ -150,19 +212,19 @@ export const CheckOutModal: React.FC = () => {
           </div>
 
           <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-            {/* Debt Status Block */}
+            {/* Debt / Overpayment / Zero Balance Status Block */}
             {financials.debtUsd > 0 ? (
               <div className="bg-[#F43F5E]/10 border border-[#F43F5E]/35 rounded-xl p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-2.5">
                     <ShieldAlert className="w-5 h-5 text-[#F43F5E] shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-sm font-semibold text-[#F43F5E]">
+                      <div className="text-sm font-semibold text-[#F43F5E] font-mono tabular-nums">
                         Обнаружен неоплаченный долг: {formatUsd(financials.debtUsd)}
                       </div>
                       <p className="text-xs text-slate-300 mt-0.5">
                         Примите оплату в фолио гостя перед выселением или оформите принудительное
-                        закрытие с указанием причины в аудит-лог.
+                        закрытие (только Старший админ / Владелец + причина ≥ 8 символов).
                       </p>
                     </div>
                   </div>
@@ -178,30 +240,182 @@ export const CheckOutModal: React.FC = () => {
                   </button>
                 </div>
 
-                <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer pt-1">
-                  <input
-                    type="checkbox"
-                    checked={overrideDebt}
-                    onChange={(e) => setOverrideDebt(e.target.checked)}
-                    className="w-4 h-4 accent-[#F43F5E]"
-                  />
-                  <span>Закрыть с долгом (требуется причина для аудит-лога)</span>
-                </label>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={overrideDebt}
+                      onChange={(e) => setOverrideDebt(e.target.checked)}
+                      className="w-4 h-4 accent-[#F43F5E]"
+                    />
+                    <span>Закрыть с долгом (в аудит-лог)</span>
+                  </label>
+                  <select
+                    aria-label="Роль подтверждающего"
+                    value={actorRole}
+                    onChange={(e) => setActorRole(e.target.value as AdminRole)}
+                    className="bg-[#0B0F17] border border-white/[0.12] rounded-lg px-2.5 py-1 text-xs text-slate-200"
+                  >
+                    <option value="senior_admin">Старший админ</option>
+                    <option value="owner">Владелец</option>
+                    <option value="reception">Админ ресепшн (нет прав)</option>
+                  </select>
+                </div>
 
-                {overrideDebt && (
-                  <input
-                    type="text"
-                    value={overrideReason}
-                    onChange={(e) => setOverrideReason(e.target.value)}
-                    placeholder="Укажите причину (например: гость переведёт на карту позже / согласовано с владельцем)"
-                    className="w-full bg-[#0B0F17] border border-[#F43F5E]/40 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#F43F5E]"
-                  />
+                {overrideDebt && !canOverrideDebtRole && (
+                  <p className="text-xs text-[#F43F5E]">
+                    Ночной администратор не может закрывать выезд с долгом — требуется подтверждение
+                    старшего администратора или владельца.
+                  </p>
                 )}
+
+                {overrideDebt && canOverrideDebtRole && (
+                  <div className="space-y-1">
+                    <input
+                      type="text"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      placeholder="Причина (минимум 8 символов: напр. согласовано с владельцем, перевод завтра)"
+                      className="w-full bg-[#0B0F17] border border-[#F43F5E]/40 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#F43F5E]"
+                    />
+                    <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                      Символов: {overrideReason.trim().length} / 8 мин.
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : financials.overpaidUsd > 0 ? (
+              <div className="bg-[#3B82F6]/10 border border-[#3B82F6]/35 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <Banknote className="w-5 h-5 text-[#3B82F6] shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-semibold text-blue-200 font-mono tabular-nums">
+                        Переплата / Возврат гостю: {formatUsd(financials.overpaidUsd)}
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5 font-mono tabular-nums">
+                        Эквивалент к возврату по курсу Ex ({state.currency.exRate}):{' '}
+                        <strong className="text-white">{formatUzs(refundUzsAmount)}</strong>. Можно
+                        выдать возврат сейчас или завершить выезд (переплата не блокирует Check-out).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex p-0.5 bg-[#0B0F17] border border-white/[0.1] rounded-lg text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setRefundCurrency('UZS')}
+                      className={`px-2.5 py-1 rounded-md font-medium ${
+                        refundCurrency === 'UZS' ? 'bg-[#1A2234] text-white' : 'text-slate-400'
+                      }`}
+                    >
+                      UZS ({formatUzs(refundUzsAmount)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRefundCurrency('USD')}
+                      className={`px-2.5 py-1 rounded-md font-medium ${
+                        refundCurrency === 'USD' ? 'bg-[#1A2234] text-white' : 'text-slate-400'
+                      }`}
+                    >
+                      USD ({formatUsd(financials.overpaidUsd)})
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleIssueOverpaymentRefund}
+                    className="px-3.5 py-1.5 rounded-lg bg-[#3B82F6] hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                  >
+                    <Banknote className="w-3.5 h-3.5" />
+                    Выдать возврат из кассы
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="bg-[#10B981]/10 border border-[#10B981]/30 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-[#10B981]">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>Баланс сходится в $0 — долгов у гостя нет.</span>
+              </div>
+            )}
+
+            {/* E-mehmon Per-Guest Legal Compliance Block */}
+            {hasForeigner && (
+              <div
+                className={`rounded-xl p-4 space-y-3 border ${
+                  unregisteredForeigners.length > 0
+                    ? 'bg-[#F43F5E]/10 border-[#F43F5E]/40'
+                    : 'bg-[#0B0F17] border-[#10B981]/30'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold">
+                    {unregisteredForeigners.length > 0 ? (
+                      <ShieldAlert className="w-4 h-4 text-[#F43F5E] shrink-0" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4 text-[#10B981] shrink-0" />
+                    )}
+                    <span
+                      className={
+                        unregisteredForeigners.length > 0 ? 'text-[#F43F5E]' : 'text-[#10B981]'
+                      }
+                    >
+                      {unregisteredForeigners.length > 0
+                        ? `Нарушение E-mehmon: не зарегистрировано иностранцев — ${unregisteredForeigners.length}`
+                        : 'Все иностранные гости зарегистрированы в E-mehmon'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  {foreignGuests.map((guest) => (
+                    <div
+                      key={guest.id}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#0B0F17]/90 border border-white/[0.06] text-xs"
+                    >
+                      <div>
+                        <span className="font-medium text-white">{guest.fullName}</span>
+                        <span className="text-slate-400 font-mono ml-2">
+                          {guest.citizenship} · {guest.passportNo}
+                        </span>
+                      </div>
+                      {guest.emehmonRegistered ? (
+                        <span className="text-[#10B981] font-medium">Зарегистрирован ✓</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => markGuestEmehmonRegistered(booking.id, guest.id)}
+                          className="px-2.5 py-1 rounded-md bg-[#10B981] hover:bg-emerald-500 text-slate-950 font-semibold"
+                        >
+                          Отметить E-mehmon
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {unregisteredForeigners.length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    <label className="flex items-center gap-2 text-xs text-rose-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={overrideEmehmon}
+                        onChange={(e) => setOverrideEmehmon(e.target.checked)}
+                        className="w-4 h-4 accent-[#F43F5E]"
+                      />
+                      <span>Оформить исключение E-mehmon (требуется причина ≥ 8 символов)</span>
+                    </label>
+                    {overrideEmehmon && (
+                      <input
+                        type="text"
+                        value={emehmonOverrideReason}
+                        onChange={(e) => setEmehmonOverrideReason(e.target.value)}
+                        placeholder="Укажите основание (напр. дип. паспорт / сбой портала E-mehmon, тикет #...)"
+                        className="w-full bg-[#0B0F17] border border-[#F43F5E]/40 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#F43F5E]"
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -320,7 +534,7 @@ export const CheckOutModal: React.FC = () => {
                       key={l}
                       type="button"
                       onClick={() => setReviewLang(l)}
-                      className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase ${
+                      className={`px-2 py-0.5 rounded-md text-xs font-bold uppercase whitespace-nowrap ${
                         reviewLang === l
                           ? 'bg-[#F59E0B] text-slate-950'
                           : 'bg-[#121826] text-slate-400 hover:text-white'
@@ -358,7 +572,8 @@ export const CheckOutModal: React.FC = () => {
               <div className="flex items-center gap-2 text-xs text-[#F59E0B]">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>
-                  Отметьте все пункты проверки и урегулируйте долг для завершения выселения.
+                  Подтвердите все обязательные пункты, статус E-mehmon и расчёт с гостем для
+                  завершения выселения.
                 </span>
               </div>
             )}

@@ -24,6 +24,18 @@ export interface GuestReplyDraftResult {
   engine: 'gemini' | 'local';
 }
 
+function getApiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token =
+    typeof import.meta !== 'undefined' && import.meta.env
+      ? (import.meta.env as Record<string, string | undefined>).VITE_API_AUTH_TOKEN?.trim()
+      : undefined;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 /**
  * Calls server-side Gemini endpoint (/api/ai/parse-command) for complex Russian reception phrasing,
  * with instant 100% deterministic fallback to local parseRussianReceptionCommand.
@@ -41,7 +53,7 @@ export async function parseReceptionCommandSmart(
     const timer = window.setTimeout(() => controller.abort(), 5000);
     const res = await fetch('/api/ai/parse-command', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getApiHeaders(),
       signal: controller.signal,
       body: JSON.stringify({
         text: rawInput,
@@ -162,7 +174,7 @@ export async function extractPassportMrzFromPhoto(
     const timer = window.setTimeout(() => controller.abort(), 12000);
     const res = await fetch('/api/ai/mrz-ocr', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getApiHeaders(),
       signal: controller.signal,
       body: JSON.stringify({ imageBase64: base64Data, mimeType }),
     }).finally(() => window.clearTimeout(timer));
@@ -239,7 +251,7 @@ export async function generateGuestReplySmart(params: {
     const timer = window.setTimeout(() => controller.abort(), 7000);
     const res = await fetch('/api/ai/draft-reply', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getApiHeaders(),
       signal: controller.signal,
       body: JSON.stringify(params),
     }).finally(() => window.clearTimeout(timer));

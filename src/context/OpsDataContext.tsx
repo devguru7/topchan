@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from 'react';
 import type {
   AppState,
@@ -18,8 +19,21 @@ import { FALLBACK_CBU_EUR, FALLBACK_CBU_USD } from '../data/seed';
 import { formatUsd, formatUzs } from '../utils/math';
 import { addDaysIso, getTashkentTodayIso } from '../utils/time';
 import { findRoomConflicts } from '../utils/availability';
-import { getStorageAdapter, type StorageAdapterKind } from '../services/storageAdapter';
+import {
+  getStorageAdapter,
+  type StorageAdapterKind,
+  type SyncStatusInfo,
+} from '../services/storageAdapter';
 import { opsReducer } from '../store/opsReducer';
+import {
+  validateCheckOutGuards,
+  validateGuestPayment,
+} from '../store/handlers/bookingHandlers';
+import {
+  validateCashCalc,
+  validatePettyCash,
+  validateSafeCollection,
+} from '../store/handlers/cashHandlers';
 import type {
   AddLuggagePayload,
   AddPaymentPayload,
@@ -27,6 +41,7 @@ import type {
   CheckInPayload,
   CheckOutPayload,
   ExtendOrMovePayload,
+  IssueRefundPayload,
   RecordCashCalcPayload,
   StartLaundryPayload,
   SubmitGuestQrPayload,
@@ -36,8 +51,9 @@ import { useUI } from './UIContext';
 export interface OpsDataContextValue {
   state: AppState;
   storageKind: StorageAdapterKind;
+  syncStatusInfo: SyncStatusInfo;
   checkIn: (payload: CheckInPayload) => boolean;
-  checkOut: (payload: CheckOutPayload) => void;
+  checkOut: (payload: CheckOutPayload) => boolean;
   addLedgerCharge: (
     bookingId: string,
     category: LedgerEntry['category'],
@@ -45,7 +61,8 @@ export interface OpsDataContextValue {
     amountUsd: number,
     options?: { startLaundryMode?: 'fast' | 'medium' }
   ) => void;
-  addPayment: (params: AddPaymentPayload) => void;
+  addPayment: (params: AddPaymentPayload) => boolean;
+  issueRefund: (params: IssueRefundPayload) => boolean;
   extendOrMoveStay: (params: ExtendOrMovePayload) => boolean;
   commitParsedCommand: (cmd: ParsedCommand) => boolean;
   toggleChecklistItem: (id: string) => void;
@@ -59,10 +76,10 @@ export interface OpsDataContextValue {
   addTransferJob: (params: AddTransferPayload) => void;
   cycleTransferStatus: (id: string) => void;
   adjustStock: (id: string, delta: number) => void;
-  addPettyCashExpense: (category: string, amountUzs: number, note: string) => void;
-  recordCashCalculatorTransaction: (params: RecordCashCalcPayload) => void;
-  createSafeCollection: (amountUzs: number, amountUsd: number, amountEur: number) => void;
-  confirmSafeCollection: (id: string) => void;
+  addPettyCashExpense: (category: string, amountUzs: number, note: string) => boolean;
+  recordCashCalculatorTransaction: (params: RecordCashCalcPayload) => boolean;
+  createSafeCollection: (amountUzs: number, amountUsd: number, amountEur: number) => boolean;
+  confirmSafeCollection: (id: string) => boolean;
   submitGuestQrRequest: (params: SubmitGuestQrPayload) => void;
   updateTelegramAlertDraft: (alertId: string, draftReply: string) => void;
   executeTelegramAction: (alertId: string, actionId: string) => void;
@@ -81,6 +98,9 @@ const OpsDataContext = createContext<OpsDataContextValue | null>(null);
 export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const adapter = useMemo(() => getStorageAdapter(), []);
   const [state, dispatch] = useReducer(opsReducer, undefined, () => adapter.loadState());
+  const [syncStatusInfo, setSyncStatusInfo] = useState<SyncStatusInfo>(() =>
+    adapter.getSyncStatus()
+  );
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -105,6 +125,25 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       dispatch({ type: 'HYDRATE_STATE', payload: remoteState });
     });
   }, [adapter]);
+
+  // Sync status & optimistic-concurrency conflict alerts
+  useEffect(() => {
+    const unsubStatus = adapter.subscribeSyncStatus?.((info) => {
+      setSyncStatusInfo(info);
+    });
+    const unsubConflict = adapter.subscribeConflict?.((latestRemote) => {
+      dispatch({ type: 'HYDRATE_STATE', payload: latestRemote });
+      pushToast(
+        'Конфликт синхронизации',
+        'Другое устройство обновило смену — загружена актуальная версия. Проверьте последнее действие.',
+        'amber'
+      );
+    });
+    return () => {
+      unsubStatus?.();
+      unsubConflict?.();
+    };
+  }, [adapter, pushToast]);
 
   // Hydrate from remote Supabase snapshot if configured
   useEffect(() => {
@@ -201,6 +240,20 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return false;
       }
 
+      if (payload.initialPayment && payload.initialPayment.originalAmount > 0) {
+        const payErr = validateGuestPayment(
+          stateRef.current,
+          payload.initialPayment.pocketId,
+          payload.initialPayment.originalCurrency,
+          payload.initialPayment.originalAmount,
+          payload.changeUzsOut ?? 0
+        );
+        if (payErr) {
+          pushToast('Ошибка оплаты при заезде', payErr, 'rose');
+          return false;
+        }
+      }
+
       dispatch({ type: 'CHECK_IN', payload });
       closeCheckInModal();
       pushToast(
@@ -237,9 +290,53 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const addPayment = useCallback(
-    (params: AddPaymentPayload) => {
+    (params: AddPaymentPayload): boolean => {
+      const err = validateGuestPayment(
+        stateRef.current,
+        params.pocketId,
+        params.currency,
+        params.originalAmount,
+        params.changeUzsOut ?? 0
+      );
+      if (err) {
+        pushToast('Оплата отклонена', err, 'rose');
+        return false;
+      }
       dispatch({ type: 'ADD_PAYMENT', payload: params });
       pushToast('Оплата проведена', `Зачислено ${formatUsd(params.usdEquivalent)} в кассу`, 'emerald');
+      return true;
+    },
+    [pushToast]
+  );
+
+  const issueRefund = useCallback(
+    (params: IssueRefundPayload): boolean => {
+      const pocket = stateRef.current.pockets.find((p) => p.id === params.pocketId);
+      if (!pocket || pocket.currency !== params.currency) {
+        pushToast('Ошибка возврата', 'Выбранный карман не соответствует валюте возврата', 'rose');
+        return false;
+      }
+      if (params.amountOriginal <= 0 || params.amountUsd <= 0) {
+        pushToast('Ошибка возврата', 'Сумма возврата должна быть больше нуля', 'rose');
+        return false;
+      }
+      if (pocket.balance < params.amountOriginal) {
+        pushToast(
+          'Недостаточно средств в кассе',
+          `В кармане ${pocket.name} недостаточно средств для выдачи возврата`,
+          'rose'
+        );
+        return false;
+      }
+      dispatch({ type: 'ISSUE_REFUND', payload: params });
+      pushToast(
+        'Возврат переплаты выдан',
+        params.currency === 'UZS'
+          ? `Выдано ${formatUzs(params.amountOriginal)} (${formatUsd(params.amountUsd)})`
+          : `Выдано ${formatUsd(params.amountOriginal)}`,
+        'emerald'
+      );
+      return true;
     },
     [pushToast]
   );
@@ -283,7 +380,12 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const checkOut = useCallback(
-    (payload: CheckOutPayload) => {
+    (payload: CheckOutPayload): boolean => {
+      const guardErr = validateCheckOutGuards(stateRef.current, payload);
+      if (guardErr) {
+        pushToast('Выселение заблокировано', guardErr, 'rose');
+        return false;
+      }
       const bkg = stateRef.current.bookings.find((b) => b.id === payload.bookingId);
       const lastSeg = bkg?.segments[bkg.segments.length - 1];
       const room = stateRef.current.physicalRooms.find((r) => r.id === lastSeg?.roomId);
@@ -299,6 +401,7 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         `${roomLabel} · ${primaryGuest} → задача уборки создана, Review Booster в очереди`,
         'emerald'
       );
+      return true;
     },
     [closeCheckOutModal, setSelectedBookingId, pushToast]
   );
@@ -477,35 +580,57 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const addPettyCashExpense = useCallback(
-    (category: string, amountUzs: number, note: string) => {
-      if (amountUzs <= 0) return;
+    (category: string, amountUzs: number, note: string): boolean => {
+      const err = validatePettyCash(stateRef.current, amountUzs);
+      if (err) {
+        pushToast('Хозрасход отклонён', err, 'rose');
+        return false;
+      }
       dispatch({ type: 'ADD_PETTY_CASH', payload: { category, amountUzs, note } });
       pushToast('Хозрасход проведён', `-${formatUzs(amountUzs)} (${category})`, 'amber');
+      return true;
     },
     [pushToast]
   );
 
   const recordCashCalculatorTransaction = useCallback(
-    (params: RecordCashCalcPayload) => {
+    (params: RecordCashCalcPayload): boolean => {
+      const err = validateCashCalc(stateRef.current, params);
+      if (err) {
+        pushToast('Операция кассы отклонена', err, 'rose');
+        return false;
+      }
       dispatch({ type: 'RECORD_CASH_CALC', payload: params });
       pushToast('Операция проведена в кассу', params.label, 'emerald');
+      return true;
     },
     [pushToast]
   );
 
   const createSafeCollection = useCallback(
-    (amountUzs: number, amountUsd: number, amountEur: number) => {
-      if (amountUzs <= 0 && amountUsd <= 0 && amountEur <= 0) return;
+    (amountUzs: number, amountUsd: number, amountEur: number): boolean => {
+      const err = validateSafeCollection(stateRef.current, { amountUzs, amountUsd, amountEur });
+      if (err) {
+        pushToast('Инкассация отклонена', err, 'rose');
+        return false;
+      }
       dispatch({ type: 'CREATE_SAFE_COLLECTION', payload: { amountUzs, amountUsd, amountEur } });
       pushToast('Инкассация создана', 'Статус: «Ожидает подтверждения владельца»', 'amber');
+      return true;
     },
     [pushToast]
   );
 
   const confirmSafeCollection = useCallback(
-    (id: string) => {
+    (id: string): boolean => {
+      const col = stateRef.current.safeCollections.find((c) => c.id === id);
+      if (!col || col.status !== 'pending') {
+        pushToast('Уже подтверждено', 'Эта инкассация уже была закрыта ранее', 'amber');
+        return false;
+      }
       dispatch({ type: 'CONFIRM_SAFE_COLLECTION', payload: { id } });
-      pushToast('Инкассация подтверждена', 'Владелец подтвердил получение средств', 'emerald');
+      pushToast('Инкассация подтверждена', 'Владелец подтвердил получение средств из сейфа', 'emerald');
+      return true;
     },
     [pushToast]
   );
@@ -716,10 +841,12 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     () => ({
       state,
       storageKind: adapter.kind,
+      syncStatusInfo,
       checkIn,
       checkOut,
       addLedgerCharge,
       addPayment,
+      issueRefund,
       extendOrMoveStay,
       commitParsedCommand,
       toggleChecklistItem,
@@ -752,10 +879,12 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [
       state,
       adapter.kind,
+      syncStatusInfo,
       checkIn,
       checkOut,
       addLedgerCharge,
       addPayment,
+      issueRefund,
       extendOrMoveStay,
       commitParsedCommand,
       toggleChecklistItem,

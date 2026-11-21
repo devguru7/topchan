@@ -1,4 +1,5 @@
-import type { BookingGroup, CurrencyCode, StayGuest } from '../types/ops';
+import type { BookingGroup, CurrencyCode, StayGuest, StaySegment } from '../types/ops';
+import { addDaysIso } from './time';
 
 export function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -69,14 +70,60 @@ export function calcTouristTaxPerNightUzs(
   return Math.round(bcvUzs * rate);
 }
 
+function countUniqueSegmentNights(segments: StaySegment[]): number {
+  if (segments.length === 0) return 0;
+
+  const uniqueNights = new Set<string>();
+  let usedDateSpan = false;
+
+  for (const seg of segments) {
+    const rawNights = Math.max(0, Math.floor(seg.nights));
+    if (rawNights === 0) continue;
+
+    if (seg.fromDate && seg.toDate && seg.fromDate < seg.toDate) {
+      usedDateSpan = true;
+      let cursor = seg.fromDate;
+      // Guard against malformed multi-year spans (cap at 366 days per segment)
+      let guard = 0;
+      while (cursor < seg.toDate && guard < 366) {
+        uniqueNights.add(cursor);
+        cursor = addDaysIso(cursor, 1);
+        guard += 1;
+      }
+    } else if (seg.fromDate) {
+      usedDateSpan = true;
+      for (let i = 0; i < rawNights; i++) {
+        uniqueNights.add(addDaysIso(seg.fromDate, i));
+      }
+    }
+  }
+
+  if (usedDateSpan) {
+    return uniqueNights.size;
+  }
+
+  // Fallback if dates are missing: use max segment duration rather than summing parallel rooms
+  return segments.reduce((maxN, seg) => Math.max(maxN, Math.max(0, Math.floor(seg.nights))), 0);
+}
+
 export function calcBookingTouristTaxUzs(
   booking: Pick<BookingGroup, 'guests' | 'segments'>,
   bcvUzs: number,
   totalPhysicalRooms: number
 ): number {
-  const totalNights = booking.segments.reduce((acc, seg) => acc + Math.max(1, seg.nights), 0);
+  if (booking.segments.length === 0 || booking.guests.length === 0) return 0;
+
+  const sharedUniqueNights = countUniqueSegmentNights(booking.segments);
+
   return booking.guests.reduce((sum, guest) => {
-    return sum + calcTouristTaxPerNightUzs(guest, bcvUzs, totalPhysicalRooms) * totalNights;
+    let guestNights = sharedUniqueNights;
+    if (guest.segmentId) {
+      const assignedSeg = booking.segments.find((s) => s.id === guest.segmentId);
+      if (assignedSeg) {
+        guestNights = countUniqueSegmentNights([assignedSeg]);
+      }
+    }
+    return sum + calcTouristTaxPerNightUzs(guest, bcvUzs, totalPhysicalRooms) * guestNights;
   }, 0);
 }
 
@@ -128,18 +175,78 @@ export function calcDualRateChange(params: {
   cbuEur: number;
 }): ChangeCalcResult {
   const { billUsd, receivedCurrency, receivedAmount, accRate, exRate, cbuUsd, cbuEur } = params;
-  const cleanBillUsd = Math.max(0, round2(billUsd));
-  const cleanReceived = Math.max(0, receivedAmount);
-  const billUzs = calcAccommodationUzs(cleanBillUsd, accRate);
+  const cleanBillUsd = Number.isFinite(billUsd) ? Math.max(0, round2(billUsd)) : 0;
+  const cleanReceived = Number.isFinite(receivedAmount) ? Math.max(0, receivedAmount) : 0;
+  const safeAccRate = Number.isFinite(accRate) && accRate > 0 ? accRate : 0;
+  const safeExRate = Number.isFinite(exRate) && exRate > 0 ? exRate : 0;
+  const safeCbuUsd = Number.isFinite(cbuUsd) && cbuUsd > 0 ? cbuUsd : 0;
+  const safeCbuEur = Number.isFinite(cbuEur) && cbuEur > 0 ? cbuEur : 0;
 
+  const billUzs = safeAccRate > 0 ? calcAccommodationUzs(cleanBillUsd, safeAccRate) : 0;
+
+  // Explicit currency validation — never silently default unknown currencies to EUR
+  if (receivedCurrency !== 'USD' && receivedCurrency !== 'UZS' && receivedCurrency !== 'EUR') {
+    return {
+      billUsd: cleanBillUsd,
+      billUzs,
+      receivedUsdEquivalent: 0,
+      overpaidUsd: 0,
+      underpaidUsd: cleanBillUsd,
+      changeUsd: 0,
+      changeUzs: 0,
+    };
+  }
+
+  // Same-currency UZS path: NEVER round-trip through exRate (zero spread loss in guest's own currency)
+  if (receivedCurrency === 'UZS') {
+    const cleanReceivedUzs = Math.round(cleanReceived);
+    if (cleanReceivedUzs === billUzs) {
+      return {
+        billUsd: cleanBillUsd,
+        billUzs,
+        receivedUsdEquivalent: cleanBillUsd,
+        overpaidUsd: 0,
+        underpaidUsd: 0,
+        changeUsd: 0,
+        changeUzs: 0,
+      };
+    }
+
+    if (cleanReceivedUzs > billUzs) {
+      const diffUzs = cleanReceivedUzs - billUzs;
+      const changeUzs = Math.floor(diffUzs / 1000) * 1000;
+      const overpaidUsd = safeAccRate > 0 ? round2(diffUzs / safeAccRate) : 0;
+      return {
+        billUsd: cleanBillUsd,
+        billUzs,
+        receivedUsdEquivalent: safeAccRate > 0 ? round2(cleanBillUsd + overpaidUsd) : cleanBillUsd,
+        overpaidUsd,
+        underpaidUsd: 0,
+        changeUsd: overpaidUsd,
+        changeUzs,
+      };
+    }
+
+    const receivedUsdEquivalent = safeAccRate > 0 ? round2(cleanReceivedUzs / safeAccRate) : 0;
+    return {
+      billUsd: cleanBillUsd,
+      billUzs,
+      receivedUsdEquivalent,
+      overpaidUsd: 0,
+      underpaidUsd: Math.max(0, round2(cleanBillUsd - receivedUsdEquivalent)),
+      changeUsd: 0,
+      changeUzs: 0,
+    };
+  }
+
+  // Cross-currency USD or EUR path
   let receivedUsdEquivalent = 0;
   if (receivedCurrency === 'USD') {
     receivedUsdEquivalent = round2(cleanReceived);
-  } else if (receivedCurrency === 'UZS') {
-    receivedUsdEquivalent = accRate > 0 ? round2(cleanReceived / accRate) : 0;
   } else {
-    const eurToUsd = cbuUsd > 0 ? cbuEur / cbuUsd : 1.1;
-    receivedUsdEquivalent = round2(cleanReceived * eurToUsd);
+    // EUR
+    const eurToUsd = safeCbuUsd > 0 && safeCbuEur > 0 ? safeCbuEur / safeCbuUsd : 0;
+    receivedUsdEquivalent = eurToUsd > 0 ? round2(cleanReceived * eurToUsd) : 0;
   }
 
   const diffUsd = round2(receivedUsdEquivalent - cleanBillUsd);
@@ -151,7 +258,7 @@ export function calcDualRateChange(params: {
       overpaidUsd: diffUsd,
       underpaidUsd: 0,
       changeUsd: diffUsd,
-      changeUzs: calcChangeUzs(diffUsd, exRate),
+      changeUzs: safeExRate > 0 ? calcChangeUzs(diffUsd, safeExRate) : 0,
     };
   }
 

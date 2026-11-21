@@ -251,16 +251,17 @@ export const QrPosterModal: React.FC = () => {
         {/* Printable Laminated Poster Sheet */}
         <div className="p-6 print:p-8" id="printable-qr-poster">
           <div className="mx-auto max-w-md rounded-2xl border-2 border-slate-200 bg-white p-6 text-slate-900 shadow-lg print:max-w-lg print:border-slate-900 print:shadow-none">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">
-                  {state.integrations.propertyName} · Tashkent
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-4">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-widest text-emerald-700 truncate">
+                  {state.integrations.propertyName}
+                  {/tashkent|ташкент/i.test(state.integrations.propertyName) ? '' : ' · Tashkent'}
                 </p>
                 <h3 className="mt-0.5 text-2xl font-extrabold tracking-tight text-slate-950">
                   {selectedRoom?.code ?? 'Guest Room'}
                 </h3>
               </div>
-              <div className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-bold text-white">
+              <div className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-bold text-white whitespace-nowrap shrink-0">
                 RU · EN · UZ · 中文
               </div>
             </div>

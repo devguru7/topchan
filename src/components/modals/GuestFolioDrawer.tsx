@@ -18,7 +18,7 @@ import {
   calcAccommodationUzs,
   calcBookingTotals,
   calcBookingTouristTaxUzs,
-  calcChangeUzs,
+  calcDualRateChange,
   formatUsd,
   formatUzs,
   round2,
@@ -117,28 +117,37 @@ export const GuestFolioDrawer: React.FC = () => {
   const touristTaxUzs = calcBookingTouristTaxUzs(booking, state.currency.bcvUzs, activePhysicalCount);
 
   const parsedPayNum = Math.max(0, parseFloat(payAmount) || 0);
-  const payUsdEq =
-    payCurrency === 'USD'
-      ? round2(parsedPayNum)
-      : payCurrency === 'UZS'
-        ? round2(parsedPayNum / state.currency.accRate)
-        : round2(parsedPayNum * (state.currency.cbuEur / state.currency.cbuUsd));
-  const overpaidUsd = financials.debtUsd > 0 && payUsdEq > financials.debtUsd ? round2(payUsdEq - financials.debtUsd) : 0;
-  const changeUzsOut = overpaidUsd > 0 ? calcChangeUzs(overpaidUsd, state.currency.exRate) : 0;
+  const isCashPocket =
+    pocketId === 'cash_uzs' || pocketId === 'cash_usd' || pocketId === 'cash_eur';
+  const payCalc = calcDualRateChange({
+    billUsd: Math.max(0, financials.debtUsd),
+    receivedCurrency: payCurrency,
+    receivedAmount: parsedPayNum,
+    accRate: state.currency.accRate,
+    exRate: state.currency.exRate,
+    cbuUsd: state.currency.cbuUsd,
+    cbuEur: state.currency.cbuEur,
+  });
+  const payUsdEq = payCalc.receivedUsdEquivalent;
+  const changeUzsOut =
+    financials.debtUsd > 0 && isCashPocket ? payCalc.changeUzs : 0;
 
   const handlePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (parsedPayNum <= 0) return;
-    addPayment({
+    const ok = addPayment({
       bookingId: booking.id,
       pocketId,
       currency: payCurrency,
       originalAmount: parsedPayNum,
-      usdEquivalent: overpaidUsd > 0 ? financials.debtUsd : payUsdEq,
+      usdEquivalent:
+        financials.debtUsd > 0 && changeUzsOut > 0 ? financials.debtUsd : payUsdEq,
       changeUzsOut,
       receiptVerified: pocketId === 'transfer',
     });
-    setShowPaymentForm(false);
+    if (ok) {
+      setShowPaymentForm(false);
+    }
   };
 
   const targetMove = availableRoomsForMove.find((o) => o.key === moveRoomKey) ?? availableRoomsForMove[0];
@@ -579,17 +588,19 @@ export const GuestFolioDrawer: React.FC = () => {
                       onChange={(e) => {
                         const p = e.target.value as CashPocketId;
                         setPocketId(p);
-                        if (p === 'cash_usd' || p === 'safe') setPayCurrency('USD');
+                        if (p === 'cash_usd') setPayCurrency('USD');
                         else if (p === 'cash_eur') setPayCurrency('EUR');
                         else setPayCurrency('UZS');
                       }}
                       className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
                     >
-                      {state.pockets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
+                      {state.pockets
+                        .filter((p) => p.id !== 'safe')
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
                     </select>
                   </div>
                   <div>

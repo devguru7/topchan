@@ -17,7 +17,8 @@ import type { CashPocketId, CurrencyCode } from '../../types/ops';
 import { parseTd3Mrz, SAMPLE_MRZ_ITALY, SAMPLE_MRZ_KOREA } from '../../utils/mrz';
 import {
   calcAccommodationUzs,
-  calcChangeUzs,
+  calcDualRateChange,
+  calcTouristTaxPerNightUzs,
   formatUsd,
   formatUzs,
   round2,
@@ -228,18 +229,43 @@ export const CheckInModal: React.FC = () => {
     ).slice(0, 6);
   }, [conflicts.length, selectedOption, state.physicalRooms, state.bookings, fromDate, toDate]);
 
+  const paymentPockets = useMemo(
+    () => state.pockets.filter((p) => p.id !== 'safe'),
+    [state.pockets]
+  );
+  const isCashPocket =
+    payPocket === 'cash_uzs' || payPocket === 'cash_usd' || payPocket === 'cash_eur';
+
   const totalUsd = round2(Math.max(1, nights) * nightlyRate);
   const totalUzs = calcAccommodationUzs(totalUsd, state.currency.accRate);
 
-  const paidUsdEq = useMemo(() => {
-    if (!payNow || payAmount <= 0) return 0;
-    if (payCurrency === 'USD') return round2(payAmount);
-    if (payCurrency === 'UZS') return round2(payAmount / state.currency.accRate);
-    return round2(payAmount * (state.currency.cbuEur / state.currency.cbuUsd));
-  }, [payNow, payAmount, payCurrency, state.currency]);
+  const payCalc = useMemo(
+    () =>
+      calcDualRateChange({
+        billUsd: totalUsd,
+        receivedCurrency: payCurrency,
+        receivedAmount: payNow ? Math.max(0, payAmount) : 0,
+        accRate: state.currency.accRate,
+        exRate: state.currency.exRate,
+        cbuUsd: state.currency.cbuUsd,
+        cbuEur: state.currency.cbuEur,
+      }),
+    [totalUsd, payCurrency, payNow, payAmount, state.currency]
+  );
 
-  const overpaidUsd = paidUsdEq > totalUsd ? round2(paidUsdEq - totalUsd) : 0;
-  const changeUzs = overpaidUsd > 0 ? calcChangeUzs(overpaidUsd, state.currency.exRate) : 0;
+  const paidUsdEq = payNow && payAmount > 0 ? payCalc.receivedUsdEquivalent : 0;
+  const changeUzs = payNow && isCashPocket ? payCalc.changeUzs : 0;
+
+  const activePhysicalCount = state.physicalRooms.filter((r) => !r.archived).length;
+  const normalizedCitizenship = citizenship.trim().toUpperCase() || 'UZB';
+  const isForeignGuest = normalizedCitizenship !== 'UZB';
+  const dailyTaxUzs = calcTouristTaxPerNightUzs(
+    { age, isForeigner: isForeignGuest },
+    state.currency.bcvUzs,
+    activePhysicalCount
+  );
+  const previewTouristTaxUzs = dailyTaxUzs * Math.max(1, nights);
+  const taxRatePct = activePhysicalCount <= 10 ? 5 : 10;
 
   const allChecked =
     chkOriginalPassport && chkVisaChecked && chkBnovoPaid && chkEmehmonDone && chkTourDone;
@@ -647,6 +673,26 @@ export const CheckInModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* Live Uzbekistan Tourist Tax (БРВ) Preview */}
+              <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div>
+                  <span className="font-semibold text-slate-200">
+                    Туристический сбор РУз (БРВ {state.currency.bcvUzs.toLocaleString('ru-RU')} ·{' '}
+                    {taxRatePct}%)
+                  </span>
+                  <p className="text-slate-400 mt-0.5">
+                    {age < 16
+                      ? `Ребёнок до 16 лет (${age} лет) — освобождён от турсбора (0 сум)`
+                      : !isForeignGuest
+                        ? `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (гражданин РУз · 0.4% БРВ)`
+                        : `${Math.max(1, nights)} н. × ${formatUzs(dailyTaxUzs)} / ночь (иностранец ${normalizedCitizenship})`}
+                  </p>
+                </div>
+                <span className="font-mono tabular-nums text-sm font-bold text-[#10B981]">
+                  {formatUzs(previewTouristTaxUzs)}
+                </span>
+              </div>
+
               {/* Payment block */}
               <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -673,13 +719,13 @@ export const CheckInModal: React.FC = () => {
                         onChange={(e) => {
                           const p = e.target.value as CashPocketId;
                           setPayPocket(p);
-                          if (p === 'cash_usd' || p === 'safe') setPayCurrency('USD');
+                          if (p === 'cash_usd') setPayCurrency('USD');
                           else if (p === 'cash_eur') setPayCurrency('EUR');
                           else setPayCurrency('UZS');
                         }}
                         className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white"
                       >
-                        {state.pockets.map((p) => (
+                        {paymentPockets.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.name}
                           </option>
@@ -691,41 +737,42 @@ export const CheckInModal: React.FC = () => {
                       <input
                         type="number"
                         min={0}
+                        step="any"
                         value={payAmount}
                         onChange={(e) => setPayAmount(parseFloat(e.target.value) || 0)}
                         className="w-full bg-[#121826] border border-white/[0.1] rounded-lg px-3 py-2 font-mono tabular-nums text-xs text-white"
                       />
                     </div>
                     <div className="flex flex-col justify-center text-xs">
-                      <span className="text-slate-400">Сдача (курс Ex {state.currency.exRate})</span>
+                      <span className="text-slate-400">
+                        {isCashPocket
+                          ? payCurrency === 'UZS'
+                            ? 'Сдача (сумы → сумы, без спреда)'
+                            : `Сдача (курс Ex ${state.currency.exRate})`
+                          : 'Безналичная оплата'}
+                      </span>
                       <span className="font-mono tabular-nums text-sm font-semibold text-[#F59E0B] mt-0.5">
-                        {changeUzs > 0 ? formatUzs(changeUzs) : '0 сум'}
+                        {!isCashPocket
+                          ? 'Без сдачи (безнал)'
+                          : changeUzs > 0
+                            ? formatUzs(changeUzs)
+                            : '0 сум'}
                       </span>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Mandatory Reception Checklist */}
+              {/* Mandatory Reception Checklist (No Check-All shortcut for legal compliance) */}
               <div className="bg-[#0B0F17] border border-white/[0.08] rounded-xl p-4 space-y-2.5">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-white">
                     <CheckSquare className="w-4 h-4 text-[#F59E0B]" />
                     <span>Обязательный протокол заселения Topchan</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChkOriginalPassport(true);
-                      setChkVisaChecked(true);
-                      setChkBnovoPaid(true);
-                      setChkEmehmonDone(true);
-                      setChkTourDone(true);
-                    }}
-                    className="text-xs text-[#3B82F6] hover:underline"
-                  >
-                    Отметить всё
-                  </button>
+                  <span className="text-xs text-slate-400">
+                    Подтвердите каждый пункт вручную
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   {[

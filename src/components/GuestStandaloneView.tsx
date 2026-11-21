@@ -45,7 +45,7 @@ const COPY: Record<
     subtitle: 'Ваш цифровой консьерж в Ташкенте — все услуги в 1 касание без очередей',
     wifi: 'Wi-Fi',
     door: 'Код двери',
-    breakfast: 'Завтрак: 07:30 – 10:30',
+    breakfast: 'Завтрак: 08:00 – 10:00',
     checkout: 'Выезд: до 12:00',
     quiet: 'Тихий час: с 23:00',
     servicesTitle: 'Заказать на ресепшен',
@@ -58,7 +58,7 @@ const COPY: Record<
     transfer: 'Трансфер в аэропорт (3 км)',
     transferDesc: 'Проверенный водитель · 10 мин до терминала',
     lateBreakfast: 'Поздний завтрак',
-    lateBreakfastDesc: 'Подадим после 10:30 в уютный топчан-двор',
+    lateBreakfastDesc: 'Подадим после 10:00 в уютный топчан-двор',
     sent: 'Заявка отправлена на ресепшен',
     adminBack: 'Режим администратора',
   },
@@ -67,7 +67,7 @@ const COPY: Record<
     subtitle: 'Your Tashkent pocket concierge — request services in 1 tap',
     wifi: 'Wi-Fi',
     door: 'Door Code',
-    breakfast: 'Breakfast: 07:30 – 10:30',
+    breakfast: 'Breakfast: 08:00 – 10:00',
     checkout: 'Check-out: 12:00',
     quiet: 'Quiet hours: 23:00',
     servicesTitle: 'Request from Reception',
@@ -80,7 +80,7 @@ const COPY: Record<
     transfer: 'Tashkent Airport Transfer (3 km)',
     transferDesc: 'Trusted hostel driver · 10 min ride',
     lateBreakfast: 'Late Breakfast',
-    lateBreakfastDesc: 'Served after 10:30 in our courtyard',
+    lateBreakfastDesc: 'Served after 10:00 in our courtyard',
     sent: 'Request sent to reception',
     adminBack: 'Staff Console',
   },
@@ -89,7 +89,7 @@ const COPY: Record<
     subtitle: 'Toshkentdagi raqamli konsyerj — barcha xizmatlar 1 bosishda',
     wifi: 'Wi-Fi',
     door: 'Eshik kodi',
-    breakfast: 'Nonushta: 07:30 – 10:30',
+    breakfast: 'Nonushta: 08:00 – 10:00',
     checkout: 'Chiqish: 12:00 gacha',
     quiet: 'Tinchlik soati: 23:00',
     servicesTitle: 'Resepshenga buyurtma',
@@ -102,7 +102,7 @@ const COPY: Record<
     transfer: 'Aeroportga transfer (3 km)',
     transferDesc: 'Ishonchli haydovchi · 10 daqiqa',
     lateBreakfast: 'Kechki nonushta',
-    lateBreakfastDesc: '10:30 dan keyin hovlida',
+    lateBreakfastDesc: '10:00 dan keyin hovlida',
     sent: 'So‘rov resepshenga yuborildi',
     adminBack: 'Administrator paneli',
   },
@@ -111,7 +111,7 @@ const COPY: Record<
     subtitle: '塔什干电子礼宾服务 — 一键预约洗衣、续住与送机',
     wifi: '无线网络',
     door: '门禁密码',
-    breakfast: '早餐: 07:30 – 10:30',
+    breakfast: '早餐: 08:00 – 10:00',
     checkout: '退房: 12:00 前',
     quiet: '安静时段: 23:00 起',
     servicesTitle: '一键预约前台服务',
@@ -124,7 +124,7 @@ const COPY: Record<
     transfer: '塔什干机场送机 (3公里)',
     transferDesc: '合作司机直达航站楼 · 约10分钟',
     lateBreakfast: '延迟早餐',
-    lateBreakfastDesc: '10:30 后在庭院供应',
+    lateBreakfastDesc: '10:00 后在庭院供应',
     sent: '预约已发送至前台',
     adminBack: '员工后台',
   },
@@ -235,13 +235,13 @@ export const GuestStandaloneView: React.FC<{ roomParam: string | null }> = ({ ro
             </div>
           </div>
 
-          <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-[#121826] p-1">
+          <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-[#121826] p-1 shrink-0">
             {(['ru', 'en', 'uz', 'zh'] as GuestLang[]).map((code) => (
               <button
                 key={code}
                 type="button"
                 onClick={() => setLang(code)}
-                className={`rounded-lg px-2 py-1 text-xs font-bold uppercase transition ${
+                className={`rounded-lg px-2 py-1 text-xs font-bold uppercase whitespace-nowrap transition ${
                   lang === code
                     ? 'bg-emerald-500 text-slate-950'
                     : 'text-slate-400 hover:text-slate-100'

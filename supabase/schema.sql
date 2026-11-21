@@ -1,22 +1,9 @@
 -- ============================================================================
 -- Topchan Ops — Production Multi-Tenant PostgreSQL / Supabase Schema
--- 18 normalized operational tables + property_snapshots sync table + RLS
+-- 19 normalized operational tables + property_snapshots (optimistic lock) + RLS
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
-
--- Helper: extract property_id from JWT claims (or fallback to current_setting)
-create or replace function public.current_property_id()
-returns text
-language sql
-stable
-as $$
-  select coalesce(
-    nullif(current_setting('request.jwt.claims', true)::jsonb ->> 'property_id', ''),
-    nullif(current_setting('app.property_id', true), ''),
-    'topchan-tashkent-01'
-  );
-$$;
 
 -- 1. Properties (Multi-tenant root)
 create table if not exists public.properties (
@@ -36,10 +23,58 @@ create table if not exists public.properties (
   updated_at timestamptz not null default now()
 );
 
--- Snapshot sync table used by SupabaseStorageAdapter for offline-first full state sync
+-- 1b. Property Members (Strict Authenticated User -> Tenant RBAC mapping)
+create table if not exists public.property_members (
+  user_id uuid not null,
+  property_id text not null references public.properties(id) on delete cascade,
+  role text not null check (role in ('owner', 'senior_admin', 'reception')),
+  created_at timestamptz not null default now(),
+  primary key (user_id, property_id)
+);
+
+-- Strict tenant extraction: requires authenticated role, NO hardcoded fallback tenant!
+create or replace function public.current_property_id()
+returns text
+language sql
+stable
+as $$
+  select case
+    when auth.role() = 'authenticated' then
+      coalesce(
+        nullif(current_setting('request.jwt.claims', true)::jsonb ->> 'property_id', ''),
+        nullif(current_setting('app.property_id', true), '')
+      )
+    else null
+  end;
+$$;
+
+-- Helper: checks that the caller is an authenticated member of the target property
+create or replace function public.is_property_member(target_property_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    auth.role() = 'authenticated'
+    and target_property_id is not null
+    and (
+      target_property_id = public.current_property_id()
+      or exists (
+        select 1
+        from public.property_members pm
+        where pm.user_id = auth.uid()
+          and pm.property_id = target_property_id
+      )
+    );
+$$;
+
+-- Snapshot sync table with optimistic concurrency revision column
 create table if not exists public.property_snapshots (
   property_id text primary key references public.properties(id) on delete cascade,
   schema_version integer not null default 3,
+  revision bigint not null default 1,
   payload jsonb not null,
   updated_at timestamptz not null default now()
 );
@@ -268,7 +303,7 @@ create table if not exists public.luggage_transfers (
   created_at timestamptz not null default now()
 );
 
--- 18. Immutable Audit Log
+-- 18. Strictly Append-Only Audit Log (Tamper-Proof)
 create table if not exists public.audit_log (
   id text primary key,
   property_id text not null references public.properties(id) on delete cascade,
@@ -279,9 +314,25 @@ create table if not exists public.audit_log (
   created_at timestamptz not null default now()
 );
 
+create or replace function public.prevent_audit_log_mutation()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'audit_log is strictly append-only and cannot be modified or deleted';
+end;
+$$;
+
+drop trigger if exists trg_audit_log_append_only on public.audit_log;
+create trigger trg_audit_log_append_only
+  before update or delete on public.audit_log
+  for each row
+  execute function public.prevent_audit_log_mutation();
+
 -- ============================================================================
 -- B-Tree Indexes on property_id + hot lookup keys
 -- ============================================================================
+create index if not exists idx_property_members_prop on public.property_members (property_id, user_id);
 create index if not exists idx_room_categories_prop on public.room_categories (property_id);
 create index if not exists idx_physical_rooms_prop on public.physical_rooms (property_id, status);
 create index if not exists idx_dorm_beds_prop on public.dorm_beds (property_id, room_id);
@@ -302,11 +353,12 @@ create index if not exists idx_audit_log_prop on public.audit_log (property_id, 
 
 -- ============================================================================
 -- Row-Level Security (RLS) Multi-Tenant Isolation Policies
+-- Strictly requires auth.role() = 'authenticated' — ZERO anonymous access!
 -- ============================================================================
 do $$
 declare
   tbl text;
-  tables text[] := array[
+  standard_tables text[] := array[
     'property_snapshots',
     'room_categories',
     'physical_rooms',
@@ -323,19 +375,38 @@ declare
     'shift_reconciliations',
     'housekeeping_tasks',
     'laundry_jobs',
-    'luggage_transfers',
-    'audit_log'
+    'luggage_transfers'
   ];
 begin
+  -- Properties: SELECT & UPDATE only for authenticated members; DELETE explicitly forbidden
   execute 'alter table public.properties enable row level security';
   execute 'drop policy if exists prop_isolation on public.properties';
-  execute 'create policy prop_isolation on public.properties for all using (id = public.current_property_id()) with check (id = public.current_property_id())';
+  execute 'drop policy if exists prop_select on public.properties';
+  execute 'drop policy if exists prop_update on public.properties';
+  execute 'drop policy if exists prop_no_delete on public.properties';
+  execute 'create policy prop_select on public.properties for select using (public.is_property_member(id))';
+  execute 'create policy prop_update on public.properties for update using (public.is_property_member(id)) with check (public.is_property_member(id))';
+  execute 'create policy prop_no_delete on public.properties for delete using (false)';
 
-  foreach tbl in array tables loop
+  -- Property members: authenticated user can only read their own memberships
+  execute 'alter table public.property_members enable row level security';
+  execute 'drop policy if exists member_self_select on public.property_members';
+  execute 'create policy member_self_select on public.property_members for select using (auth.role() = ''authenticated'' and user_id = auth.uid())';
+
+  -- Audit log: strictly append-only (SELECT & INSERT only; UPDATE/DELETE denied by RLS + trigger)
+  execute 'alter table public.audit_log enable row level security';
+  execute 'drop policy if exists tenant_isolation on public.audit_log';
+  execute 'drop policy if exists audit_select on public.audit_log';
+  execute 'drop policy if exists audit_insert on public.audit_log';
+  execute 'create policy audit_select on public.audit_log for select using (public.is_property_member(property_id))';
+  execute 'create policy audit_insert on public.audit_log for insert with check (public.is_property_member(property_id))';
+
+  -- Standard operational tables: authenticated tenant isolation
+  foreach tbl in array standard_tables loop
     execute format('alter table public.%I enable row level security', tbl);
     execute format('drop policy if exists tenant_isolation on public.%I', tbl);
     execute format(
-      'create policy tenant_isolation on public.%I for all using (property_id = public.current_property_id()) with check (property_id = public.current_property_id())',
+      'create policy tenant_isolation on public.%I for all using (public.is_property_member(property_id)) with check (public.is_property_member(property_id))',
       tbl
     );
   end loop;

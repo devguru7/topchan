@@ -7,6 +7,7 @@ import {
   handleCheckOut,
   handleCommitParsedCommand,
   handleExtendOrMoveStay,
+  handleIssueRefund,
   handleMarkEmehmonRegistered,
 } from './handlers/bookingHandlers';
 import {
@@ -42,7 +43,7 @@ import {
   handleUpdateIntegrationSettings,
 } from './handlers/settingsHandlers';
 
-export function opsReducer(state: AppState, action: OpsAction): AppState {
+function applyAction(state: AppState, action: OpsAction): AppState {
   switch (action.type) {
     case 'CHECK_IN':
       return handleCheckIn(state, action.payload, action.nowIso, action.todayIso);
@@ -52,6 +53,8 @@ export function opsReducer(state: AppState, action: OpsAction): AppState {
       return handleAddLedgerCharge(state, action.payload, action.nowIso);
     case 'ADD_PAYMENT':
       return handleAddPayment(state, action.payload, action.nowIso);
+    case 'ISSUE_REFUND':
+      return handleIssueRefund(state, action.payload, action.nowIso);
     case 'EXTEND_OR_MOVE_STAY':
       return handleExtendOrMoveStay(state, action.payload, action.nowIso, action.todayIso);
     case 'COMMIT_PARSED_COMMAND':
@@ -118,3 +121,18 @@ export function opsReducer(state: AppState, action: OpsAction): AppState {
       return state;
   }
 }
+
+export function opsReducer(state: AppState, action: OpsAction): AppState {
+  const next = applyAction(state, action);
+  if (next === state) return state;
+  if (action.type === 'HYDRATE_STATE' || action.type === 'RESET_DEMO_DATA') {
+    return next;
+  }
+  const baseRevision =
+    typeof state.revision === 'number' && Number.isFinite(state.revision) ? state.revision : 1;
+  return {
+    ...next,
+    revision: baseRevision + 1,
+  };
+}
+

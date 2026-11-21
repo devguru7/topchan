@@ -29,8 +29,10 @@ export function createSeedState(baseDateIso?: string): AppState {
 
   return {
     schemaVersion: SCHEMA_VERSION,
+    revision: 1,
     propertyId,
     adminName: 'Азиза (Смена День)',
+    adminRole: 'senior_admin',
     roomCategories: [
       {
         id: 'cat-small',
@@ -704,6 +706,7 @@ export function createSeedState(baseDateIso?: string): AppState {
         name: 'Сейф / Инкассация',
         currency: 'USD',
         balance: 1200,
+        safeBalances: { UZS: 0, USD: 1200, EUR: 0 },
         description: 'Средства на передачу владельцу хостела',
       },
     ],

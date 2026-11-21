@@ -1,4 +1,5 @@
 import type {
+  AdminRole,
   AppState,
   BookingGroup,
   CashPocketId,
@@ -37,6 +38,10 @@ export interface CheckInPayload {
 export interface CheckOutPayload {
   bookingId: string;
   debtOverrideReason?: string;
+  emehmonOverrideReason?: string;
+  slipPrintedConfirmed?: boolean;
+  emehmonClosedConfirmed?: boolean;
+  actorRole?: AdminRole;
   createLuggage?: {
     bagsCount: number;
     flightTime: string;
@@ -52,6 +57,15 @@ export interface AddPaymentPayload {
   usdEquivalent: number;
   changeUzsOut?: number;
   receiptVerified?: boolean;
+}
+
+export interface IssueRefundPayload {
+  bookingId: string;
+  pocketId: 'cash_usd' | 'cash_uzs';
+  currency: 'USD' | 'UZS';
+  amountOriginal: number;
+  amountUsd: number;
+  reason?: string;
 }
 
 export interface ExtendOrMovePayload {
@@ -118,6 +132,7 @@ export type OpsAction =
       nowIso?: string;
     }
   | { type: 'ADD_PAYMENT'; payload: AddPaymentPayload; nowIso?: string }
+  | { type: 'ISSUE_REFUND'; payload: IssueRefundPayload; nowIso?: string }
   | { type: 'EXTEND_OR_MOVE_STAY'; payload: ExtendOrMovePayload; nowIso?: string; todayIso?: string }
   | { type: 'COMMIT_PARSED_COMMAND'; payload: ParsedCommand; nowIso?: string; todayIso?: string }
   | { type: 'MARK_EMEHMON_REGISTERED'; payload: { bookingId: string; guestId: string } }

@@ -230,7 +230,12 @@ export const CashTab: React.FC = () => {
 
   const handleCopyShiftReport = () => {
     const pocketLines = state.pockets
-      .map((p) => `• ${p.name}: ${formatPocketBalance(p.currency, p.balance)}`)
+      .map((p) => {
+        if (p.id === 'safe' && p.safeBalances) {
+          return `• ${p.name}: ${formatUsd(p.safeBalances.USD)} · ${formatUzs(p.safeBalances.UZS)} · ${formatEur(p.safeBalances.EUR)}`;
+        }
+        return `• ${p.name}: ${formatPocketBalance(p.currency, p.balance)}`;
+      })
       .join('\n');
     const report = [
       `📊 ОТЧЁТ СМЕНЫ · TOPCHAN HOSTEL (${state.adminName})`,
@@ -315,9 +320,19 @@ export const CashTab: React.FC = () => {
                 )}
               </div>
               <div className="text-xl font-bold font-mono tabular-nums text-white mt-2">
-                {formatPocketBalance(pocket.currency, pocket.balance)}
+                {pocket.id === 'safe' && pocket.safeBalances
+                  ? formatUsd(pocket.safeBalances.USD)
+                  : formatPocketBalance(pocket.currency, pocket.balance)}
               </div>
-              <p className="text-xs text-slate-400 mt-1 line-clamp-1">{pocket.description}</p>
+              {pocket.id === 'safe' && pocket.safeBalances ? (
+                <div className="text-xs font-mono tabular-nums text-emerald-300/90 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                  <span>{formatUzs(pocket.safeBalances.UZS)}</span>
+                  <span>·</span>
+                  <span>{formatEur(pocket.safeBalances.EUR)}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1 line-clamp-1">{pocket.description}</p>
+              )}
             </button>
           );
         })}
@@ -942,7 +957,9 @@ export const CashTab: React.FC = () => {
                 <tr key={p.id} className="border-b border-slate-200">
                   <td className="py-1">{p.name}</td>
                   <td className="py-1 text-right font-mono tabular-nums font-semibold">
-                    {formatPocketBalance(p.currency, p.balance)}
+                    {p.id === 'safe' && p.safeBalances
+                      ? `${formatUsd(p.safeBalances.USD)} / ${formatUzs(p.safeBalances.UZS)} / ${formatEur(p.safeBalances.EUR)}`
+                      : formatPocketBalance(p.currency, p.balance)}
                   </td>
                 </tr>
               ))}
