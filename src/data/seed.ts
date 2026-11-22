@@ -1,4 +1,4 @@
-import type { AppState, DormBed } from '../types/ops';
+import type { AppState, DormBed, KitchenChecklistItem } from '../types/ops';
 import { calcDefaultAccRate, calcDefaultExRate } from '../utils/math';
 import { addDaysIso, formatTashkentDateRu, getTashkentTodayIso } from '../utils/time';
 
@@ -8,6 +8,34 @@ export const STORAGE_KEY = 'topchan_ops_state_v4';
 export const FALLBACK_CBU_USD = 12004.48;
 export const FALLBACK_CBU_EUR = 13280.68;
 export const DEFAULT_BCV_UZS = 440000;
+
+export const DEFAULT_KITCHEN_CHECKLIST: KitchenChecklistItem[] = [
+  {
+    id: 'kchk-0730',
+    time: '07:30',
+    title: 'Подготовка зала, кофе, чай и горячий завтрак',
+    done: true,
+    doneAt: '07:35',
+  },
+  {
+    id: 'kchk-0800',
+    time: '08:00–10:00',
+    title: 'Раздача бесплатного завтрака для проживающих гостей',
+    done: false,
+  },
+  {
+    id: 'kchk-1000',
+    time: '10:00–12:00',
+    title: 'Уборка буфета и подача поздних завтраков по заявкам',
+    done: false,
+  },
+  {
+    id: 'kchk-0000',
+    time: '00:00',
+    title: 'Закрытие кухни, проверка плит и дезинфекция поверхностей',
+    done: false,
+  },
+];
 
 function makeDormBeds(
   prefix: string,
@@ -331,6 +359,8 @@ export function createSeedState(baseDateIso?: string): AppState {
             emehmonCheckedOut: false,
             registrationSlipPrinted: false,
             keyIssued: true,
+            dietaryTags: ['vegetarian'],
+            dietaryNote: 'Вегетарианка, без мяса',
           },
         ],
         ledgerEntries: [
@@ -471,6 +501,7 @@ export function createSeedState(baseDateIso?: string): AppState {
             emehmonCheckedOut: false,
             registrationSlipPrinted: true,
             keyIssued: true,
+            dietaryTags: ['halal'],
           },
           {
             id: 'g-4b',
@@ -634,6 +665,8 @@ export function createSeedState(baseDateIso?: string): AppState {
             emehmonCheckedOut: false,
             registrationSlipPrinted: false,
             keyIssued: true,
+            dietaryTags: ['gluten_free'],
+            dietaryNote: 'Без глютена, травяной чай',
           },
         ],
         ledgerEntries: [
@@ -718,6 +751,136 @@ export function createSeedState(baseDateIso?: string): AppState {
             originalAmount: 24,
             pocketId: 'cash_usd',
             actor: 'Тимур (Смена Ночь)',
+          },
+        ],
+      },
+      {
+        id: 'bkg-arr-early-1',
+        propertyId,
+        bnovoId: 'BN-48410',
+        status: 'confirmed',
+        checkOutTime: '12:00',
+        expectedArrivalTime: '08:30',
+        checkingOutToday: false,
+        source: 'Bnovo',
+        notes: 'Ранний рейс из Стамбула, ожидаем в 08:30 — вероятно придут на завтрак.',
+        createdAt: `${yesterday}T11:00:00Z`,
+        segments: [
+          {
+            id: 'seg-arr-1',
+            roomId: 'room-orange-1',
+            fromDate: today,
+            toDate: plus2,
+            nights: 2,
+            nightlyRateUsd: 30,
+          },
+        ],
+        guests: [
+          {
+            id: 'g-arr-1a',
+            fullName: 'Emre Yilmaz',
+            citizenship: 'TUR',
+            age: 34,
+            passportNo: 'U28419012',
+            dob: '1992-07-04',
+            sex: 'M',
+            isForeigner: true,
+            emehmonRegistered: false,
+            emehmonCheckedOut: false,
+            registrationSlipPrinted: false,
+            keyIssued: false,
+            dietaryTags: ['halal'],
+          },
+          {
+            id: 'g-arr-1b',
+            fullName: 'Zeynep Yilmaz',
+            citizenship: 'TUR',
+            age: 31,
+            passportNo: 'U28419013',
+            dob: '1995-03-18',
+            sex: 'F',
+            isForeigner: true,
+            emehmonRegistered: false,
+            emehmonCheckedOut: false,
+            registrationSlipPrinted: false,
+            keyIssued: false,
+            dietaryTags: ['halal'],
+          },
+        ],
+        ledgerEntries: [
+          {
+            id: 'led-arr-1',
+            timestamp: `${yesterday}T11:00:00Z`,
+            type: 'charge',
+            category: 'accommodation',
+            label: 'Проживание Orange (2 ночи × $30)',
+            amountUsd: 60,
+            actor: 'Bnovo',
+          },
+        ],
+      },
+      {
+        id: 'bkg-arr-std-2',
+        propertyId,
+        bnovoId: 'BN-48418',
+        status: 'confirmed',
+        checkOutTime: '12:00',
+        expectedArrivalTime: '15:30',
+        checkingOutToday: false,
+        source: 'Bnovo',
+        notes: 'Прилёт днём, заезд после 14:00.',
+        createdAt: `${yesterday}T17:40:00Z`,
+        segments: [
+          {
+            id: 'seg-arr-2',
+            roomId: 'room-violet-1',
+            fromDate: today,
+            toDate: plus3,
+            nights: 3,
+            nightlyRateUsd: 38,
+          },
+        ],
+        guests: [
+          {
+            id: 'g-arr-2a',
+            fullName: 'Lukas Novak',
+            citizenship: 'CZE',
+            age: 29,
+            passportNo: 'CZ5512904',
+            dob: '1997-01-22',
+            sex: 'M',
+            isForeigner: true,
+            emehmonRegistered: false,
+            emehmonCheckedOut: false,
+            registrationSlipPrinted: false,
+            keyIssued: false,
+          },
+          {
+            id: 'g-arr-2b',
+            fullName: 'Tereza Novakova',
+            citizenship: 'CZE',
+            age: 27,
+            passportNo: 'CZ5512905',
+            dob: '1999-10-12',
+            sex: 'F',
+            isForeigner: true,
+            emehmonRegistered: false,
+            emehmonCheckedOut: false,
+            registrationSlipPrinted: false,
+            keyIssued: false,
+            dietaryTags: ['allergy'],
+            dietaryNote: 'Аллергия на орехи',
+          },
+        ],
+        ledgerEntries: [
+          {
+            id: 'led-arr-2',
+            timestamp: `${yesterday}T17:40:00Z`,
+            type: 'charge',
+            category: 'accommodation',
+            label: 'Проживание Violet (3 ночи × $38)',
+            amountUsd: 114,
+            actor: 'Bnovo',
           },
         ],
       },
@@ -1093,6 +1256,19 @@ export function createSeedState(baseDateIso?: string): AppState {
         done: false,
       },
     ],
+    lateBreakfastOrders: [
+      {
+        id: 'lb-1',
+        propertyId,
+        bookingId: 'bkg-yellow-1',
+        roomLabel: 'Yellow-1',
+        portions: 1,
+        requestedAt: '10:15',
+        status: 'pending',
+        note: 'Поздний завтрак (после 10:00)',
+      },
+    ],
+    kitchenChecklist: DEFAULT_KITCHEN_CHECKLIST.map((item) => ({ ...item })),
     auditLog: [
       {
         id: 'aud-1',

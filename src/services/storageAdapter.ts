@@ -1,5 +1,5 @@
 import type { AppState } from '../types/ops';
-import { createSeedState, SCHEMA_VERSION, STORAGE_KEY } from '../data/seed';
+import { createSeedState, DEFAULT_KITCHEN_CHECKLIST, SCHEMA_VERSION, STORAGE_KEY } from '../data/seed';
 import { getTashkentTodayIso } from '../utils/time';
 
 export type StorageAdapterKind = 'local' | 'supabase';
@@ -25,11 +25,19 @@ export interface StorageAdapter {
   clear(): void;
 }
 
-function isValidState(parsed: unknown): parsed is AppState {
+function isMigratableStateShape(parsed: unknown): parsed is Partial<AppState> & {
+  schemaVersion: number;
+  physicalRooms: AppState['physicalRooms'];
+  pockets: AppState['pockets'];
+  bookings: AppState['bookings'];
+} {
   if (!parsed || typeof parsed !== 'object') return false;
   const s = parsed as Partial<AppState>;
   return (
-    s.schemaVersion === SCHEMA_VERSION &&
+    typeof s.schemaVersion === 'number' &&
+    Number.isInteger(s.schemaVersion) &&
+    s.schemaVersion >= 1 &&
+    s.schemaVersion <= SCHEMA_VERSION &&
     Array.isArray(s.physicalRooms) &&
     Array.isArray(s.pockets) &&
     Array.isArray(s.bookings)
@@ -38,13 +46,13 @@ function isValidState(parsed: unknown): parsed is AppState {
 
 /**
  * Backward-compatible state migration & hydration helper.
- * Safely backfills any fields introduced in later releases (luggageItems, lostFoundItems,
- * shiftHistory, mailInbox, operationalDate, safeBalances, guestProfiles) without breaking
- * existing localStorage or Supabase snapshots.
+ * Upgrades older `schemaVersion` snapshots (1..SCHEMA_VERSION) and safely backfills any fields
+ * introduced in later releases (luggageItems, lostFoundItems, shiftHistory, mailInbox,
+ * operationalDate, safeBalances, guestProfiles) without breaking existing localStorage or Supabase snapshots.
  */
 export function migrateAppState(raw: unknown): AppState | null {
-  if (!isValidState(raw)) return null;
-  const state = raw;
+  if (!isMigratableStateShape(raw)) return null;
+  const state = raw as AppState;
   const revision =
     typeof state.revision === 'number' && Number.isFinite(state.revision) && state.revision >= 1
       ? Math.floor(state.revision)
@@ -64,6 +72,7 @@ export function migrateAppState(raw: unknown): AppState | null {
   });
   return {
     ...state,
+    schemaVersion: SCHEMA_VERSION,
     revision,
     adminRole,
     operationalDate:
@@ -83,13 +92,14 @@ export function migrateAppState(raw: unknown): AppState | null {
     stockItems: Array.isArray(state.stockItems) ? state.stockItems : [],
     telegramAlerts: Array.isArray(state.telegramAlerts) ? state.telegramAlerts : [],
     shiftChecklist: Array.isArray(state.shiftChecklist) ? state.shiftChecklist : [],
+    lateBreakfastOrders: Array.isArray(state.lateBreakfastOrders) ? state.lateBreakfastOrders : [],
+    kitchenChecklist:
+      Array.isArray(state.kitchenChecklist) && state.kitchenChecklist.length > 0
+        ? state.kitchenChecklist
+        : DEFAULT_KITCHEN_CHECKLIST.map((item) => ({ ...item })),
     auditLog: Array.isArray(state.auditLog) ? state.auditLog : [],
     pockets,
   };
-}
-
-function normalizeLoadedState(state: AppState): AppState {
-  return migrateAppState(state) ?? state;
 }
 
 /**
@@ -104,7 +114,7 @@ export class LocalStorageAdapter implements StorageAdapter {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return createSeedState();
       const parsed: unknown = JSON.parse(raw);
-      return isValidState(parsed) ? normalizeLoadedState(parsed) : createSeedState();
+      return migrateAppState(parsed) ?? createSeedState();
     } catch {
       return createSeedState();
     }
@@ -128,8 +138,9 @@ export class LocalStorageAdapter implements StorageAdapter {
       if (ev.key !== STORAGE_KEY || !ev.newValue) return;
       try {
         const parsed: unknown = JSON.parse(ev.newValue);
-        if (isValidState(parsed)) {
-          listener(normalizeLoadedState(parsed));
+        const migrated = migrateAppState(parsed);
+        if (migrated) {
+          listener(migrated);
         }
       } catch {
         // Ignore malformed cross-tab payload
@@ -164,6 +175,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   private readonly local = new LocalStorageAdapter();
   private readonly baseUrl: string;
   private readonly anonKey: string;
+  private readonly fetchImpl: typeof fetch;
   private accessToken: string | null = null;
   private syncTimer: number | null = null;
   private retryTimer: number | null = null;
@@ -177,10 +189,16 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   private readonly conflictListeners = new Set<(latest: AppState) => void>();
   private unloadBound = false;
 
-  constructor(supabaseUrl: string, anonKey: string, accessToken?: string | null) {
+  constructor(
+    supabaseUrl: string,
+    anonKey: string,
+    accessToken?: string | null,
+    options?: { fetchImpl?: typeof fetch }
+  ) {
     this.baseUrl = supabaseUrl.replace(/\/+$/, '');
     this.anonKey = anonKey;
     this.accessToken = accessToken ?? null;
+    this.fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.bindUnloadFlush();
   }
 
@@ -279,7 +297,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   async loadStateAsync(): Promise<AppState> {
     const localSnapshot = this.local.loadState();
     try {
-      const res = await fetch(
+      const res = await this.fetchImpl(
         `${this.baseUrl}/rest/v1/property_snapshots?property_id=eq.${encodeURIComponent(
           localSnapshot.propertyId
         )}&select=payload,revision&limit=1`,
@@ -298,15 +316,21 @@ export class SupabaseStorageAdapter implements StorageAdapter {
         return localSnapshot;
       }
       const rows = (await res.json()) as Array<{ payload?: unknown; revision?: number }>;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        // Fresh database with no remote snapshot yet — keep local state until first save
+        this.emitStatus({ status: 'local' });
+        return localSnapshot;
+      }
+
       const row = rows[0];
-      const remote = row?.payload;
-      if (isValidState(remote)) {
+      const migrated = migrateAppState(row?.payload);
+      if (migrated) {
         const rev =
           typeof row.revision === 'number' && Number.isFinite(row.revision)
             ? row.revision
-            : (remote.revision ?? 1);
+            : (migrated.revision ?? 1);
         const normalized: AppState = {
-          ...normalizeLoadedState(remote),
+          ...migrated,
           revision: rev,
         };
         this.lastKnownRevision = rev;
@@ -314,7 +338,12 @@ export class SupabaseStorageAdapter implements StorageAdapter {
         this.emitStatus({ status: 'synced', lastSyncedAt: new Date().toISOString() });
         return normalized;
       }
-      this.emitStatus({ status: 'synced', lastSyncedAt: new Date().toISOString() });
+
+      // Remote row exists but payload is corrupt or incompatible schemaVersion — NEVER claim 'synced'
+      this.emitStatus({
+        status: 'error',
+        errorMessage: 'Удалённый снимок повреждён или несовместим — загружены локальные данные',
+      });
       return localSnapshot;
     } catch {
       this.emitStatus({
@@ -381,7 +410,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
     try {
       // Optimistic concurrency PATCH: succeeds only if DB revision matches expectedRevision
-      const patchRes = await fetch(
+      const patchRes = await this.fetchImpl(
         `${this.baseUrl}/rest/v1/property_snapshots?property_id=eq.${encodeURIComponent(
           state.propertyId
         )}&revision=eq.${expectedRevision}`,
@@ -426,7 +455,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       }
 
       // 0 rows matched: either initial row doesn't exist yet OR another device advanced revision
-      const checkRes = await fetch(
+      const checkRes = await this.fetchImpl(
         `${this.baseUrl}/rest/v1/property_snapshots?property_id=eq.${encodeURIComponent(
           state.propertyId
         )}&select=payload,revision&limit=1`,
@@ -448,7 +477,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
       if (existingRows.length === 0) {
         // First snapshot insert for this property
-        const insertRes = await fetch(`${this.baseUrl}/rest/v1/property_snapshots`, {
+        const insertRes = await this.fetchImpl(`${this.baseUrl}/rest/v1/property_snapshots`, {
           method: 'POST',
           headers: {
             ...this.getAuthHeaders(),
@@ -488,9 +517,10 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       this.pendingState = null;
       this.retryCount = 0;
 
-      if (isValidState(latestRow.payload)) {
+      const migratedRemote = migrateAppState(latestRow.payload);
+      if (migratedRemote) {
         const mergedRemote: AppState = {
-          ...normalizeLoadedState(latestRow.payload),
+          ...migratedRemote,
           revision: latestRev,
         };
         this.local.saveState(mergedRemote);
@@ -501,8 +531,8 @@ export class SupabaseStorageAdapter implements StorageAdapter {
         this.emitConflict(mergedRemote);
       } else {
         this.emitStatus({
-          status: 'conflict',
-          errorMessage: 'Конфликт синхронизации с другим устройством',
+          status: 'error',
+          errorMessage: 'Конфликт синхронизации: удалённый снимок повреждён или несовместим',
         });
       }
       this.inFlight = false;

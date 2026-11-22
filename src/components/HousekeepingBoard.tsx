@@ -3,7 +3,7 @@ import {
   CheckCircle2,
   Clock,
   Play,
-  Sparkle,
+  SprayCan,
   Wrench,
 } from 'lucide-react';
 import { useOps, useTimers } from '../context/OpsContext';
@@ -210,7 +210,7 @@ export const HousekeepingBoard: React.FC<HousekeepingBoardProps> = ({ compact = 
                         color: '#FFFFFF',
                       }}
                     >
-                      <Sparkle className="w-4 h-4" strokeWidth={2} />
+                      <SprayCan className="w-4 h-4" strokeWidth={2} />
                       Чисто и готово
                     </button>
                   ) : (

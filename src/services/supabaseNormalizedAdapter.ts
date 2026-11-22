@@ -38,7 +38,9 @@ interface PostTableOutcome {
 
 const OFFLINE_QUEUE_KEY = 'topchan_offline_queue_v1';
 const FAILED_QUEUE_KEY = 'topchan_offline_failed_queue_v1';
+const SYNCED_AUDIT_IDS_KEY = 'topchan_synced_audit_ids_v1';
 const MAX_RETRY_ATTEMPTS = 5;
+const MAX_TRACKED_AUDIT_IDS = 500;
 
 function readStorageArray(key: string): OfflineMutationItem[] {
   if (typeof window === 'undefined') return [];
@@ -58,6 +60,29 @@ function writeStorageArray(key: string, items: OfflineMutationItem[], maxItems =
     window.localStorage.setItem(key, JSON.stringify(items.slice(-maxItems)));
   } catch {
     // Ignore storage quota issues in restricted environments
+  }
+}
+
+function readSyncedAuditIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set<string>();
+  try {
+    const raw = window.localStorage.getItem(SYNCED_AUDIT_IDS_KEY);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((v): v is string => typeof v === 'string').slice(-MAX_TRACKED_AUDIT_IDS));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeSyncedAuditIds(ids: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const bounded = Array.from(ids).slice(-MAX_TRACKED_AUDIT_IDS);
+    window.localStorage.setItem(SYNCED_AUDIT_IDS_KEY, JSON.stringify(bounded));
+  } catch {
+    // Ignore storage quota issues
   }
 }
 
@@ -189,6 +214,7 @@ export class SupabaseNormalizedSync {
   private accessToken: string | null = null;
   private queue: OfflineMutationItem[] = readStorageArray(OFFLINE_QUEUE_KEY);
   private failedQueue: OfflineMutationItem[] = readStorageArray(FAILED_QUEUE_KEY);
+  private syncedAuditIds: Set<string> = readSyncedAuditIds();
   private isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private lastFlushedAt?: string;
   private realtimeConnected = false;
@@ -304,9 +330,32 @@ export class SupabaseNormalizedSync {
     const projected = projectStateToNormalizedRows(state);
     const now = new Date().toISOString();
 
+    const queuedAuditIds = new Set<string>();
+    if (tables.includes('audit_log')) {
+      for (const item of this.queue) {
+        if (item.table !== 'audit_log') continue;
+        for (const r of item.rows) {
+          if (typeof r.id === 'string') queuedAuditIds.add(r.id);
+        }
+      }
+    }
+
+    let enqueuedAny = false;
     for (const table of tables) {
-      const rows = projected[table];
+      let rows = projected[table];
       if (!rows || rows.length === 0) continue;
+
+      if (table === 'audit_log') {
+        rows = rows.filter((r) => {
+          const id = typeof r.id === 'string' ? r.id : '';
+          if (!id) return false;
+          if (this.syncedAuditIds.has(id) || queuedAuditIds.has(id)) return false;
+          queuedAuditIds.add(id);
+          return true;
+        });
+        if (rows.length === 0) continue;
+      }
+
       const operation: OfflineMutationItem['operation'] = table === 'audit_log' ? 'insert' : 'upsert';
 
       // Only deduplicate idempotent upserts on non-audit tables; NEVER drop `insert` or `audit_log` entries
@@ -325,7 +374,10 @@ export class SupabaseNormalizedSync {
         attempts: 0,
         createdAt: now,
       });
+      enqueuedAny = true;
     }
+
+    if (!enqueuedAny) return;
 
     writeStorageArray(OFFLINE_QUEUE_KEY, this.queue);
     this.emit();
@@ -374,10 +426,19 @@ export class SupabaseNormalizedSync {
       const remaining: OfflineMutationItem[] = [];
       let failedChanged = false;
 
+      let syncedAuditsChanged = false;
       for (const item of this.queue) {
         const outcome = await this.postNormalizedTable(item);
         if (outcome.ok) {
           flushedCount += 1;
+          if (item.table === 'audit_log') {
+            for (const r of item.rows) {
+              if (typeof r.id === 'string' && r.id) {
+                this.syncedAuditIds.add(r.id);
+                syncedAuditsChanged = true;
+              }
+            }
+          }
           continue;
         }
 
@@ -403,6 +464,13 @@ export class SupabaseNormalizedSync {
 
       this.queue = remaining;
       writeStorageArray(OFFLINE_QUEUE_KEY, this.queue);
+      if (syncedAuditsChanged) {
+        if (this.syncedAuditIds.size > MAX_TRACKED_AUDIT_IDS) {
+          const trimmed = Array.from(this.syncedAuditIds).slice(-MAX_TRACKED_AUDIT_IDS);
+          this.syncedAuditIds = new Set(trimmed);
+        }
+        writeSyncedAuditIds(this.syncedAuditIds);
+      }
       if (failedChanged) {
         writeStorageArray(FAILED_QUEUE_KEY, this.failedQueue, 100);
       }

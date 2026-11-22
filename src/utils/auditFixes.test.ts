@@ -425,14 +425,30 @@ test('AUDIT FIX 9 & 10: SupabaseNormalizedSync preserves multiple audit_log inse
   // Realtime must start strictly false until WebSocket confirms SUBSCRIBED
   assert.equal(sync.getStatus().realtimeConnected, false);
 
-  // Enqueue 3 separate audit_log batches while offline -> ALL 3 must remain (never deduplicated/lost!)
+  // Enqueue 3 separate audit_log batches with NEW entries while offline -> ALL 3 must accumulate (never overwritten!)
+  const seedAudit2 = {
+    ...seed,
+    auditLog: [
+      { ...seed.auditLog[0], id: 'aud-offline-batch-2', action: 'Оплата 2' },
+      ...seed.auditLog,
+    ],
+  };
+  const seedAudit3 = {
+    ...seedAudit2,
+    auditLog: [
+      { ...seed.auditLog[0], id: 'aud-offline-batch-3', action: 'Оплата 3' },
+      ...seedAudit2.auditLog,
+    ],
+  };
   sync.enqueueNormalizedSync(seed, ['audit_log']);
-  sync.enqueueNormalizedSync(seed, ['audit_log']);
-  sync.enqueueNormalizedSync(seed, ['audit_log']);
+  sync.enqueueNormalizedSync(seedAudit2, ['audit_log']);
+  sync.enqueueNormalizedSync(seedAudit3, ['audit_log']);
+  // Calling again with NO new audit IDs must NOT duplicate already-queued entries
+  sync.enqueueNormalizedSync(seedAudit3, ['audit_log']);
   assert.equal(
     sync.getQueue().filter((item) => item.table === 'audit_log').length,
     3,
-    'Multiple audit_log insert entries must accumulate without overwriting each other'
+    'Distinct audit_log insert batches must accumulate without overwriting or duplicating already-queued IDs'
   );
 
   // Enqueue upsert that will fail with permanent 403, upsert that will fail with transient 503, and a DELETE
@@ -444,6 +460,14 @@ test('AUDIT FIX 9 & 10: SupabaseNormalizedSync preserves multiple audit_log inse
 
   // 3 audit_log inserts + 1 DELETE succeeded = 4 flushed
   assert.equal(flushed, 4);
+
+  // Calling enqueueNormalizedSync again with already-synced audit_log IDs must enqueue 0 new audit_log items
+  sync.enqueueNormalizedSync(seedAudit3, ['audit_log']);
+  assert.equal(
+    sync.getQueue().filter((item) => item.table === 'audit_log').length,
+    0,
+    'Already-synced audit_log IDs must not be re-enqueued on subsequent saves'
+  );
   assert.ok(
     calls.some((c) => c.method === 'DELETE' && c.url.includes('/rest/v1/booking_groups?id=in.(bkg-old-1,bkg-old-2)')),
     'DELETE operation must send HTTP DELETE with id=in.(...)'

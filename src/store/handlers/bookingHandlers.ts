@@ -662,6 +662,10 @@ export function handleExtendOrMoveStay(
   const nights = Math.max(1, Math.round(params.extraNights));
   const toDate = addDaysIso(fromDate, nights);
 
+  if (params.mode === 'move' && validateFemaleOnlyRoom(state, targetRoomId, bkg.guests)) {
+    return state;
+  }
+
   // Overbooking guard excluding the current booking
   const conflicts = findRoomConflicts(
     state.bookings,
@@ -955,6 +959,10 @@ export function handleCommitParsedCommand(
   const nights = Math.max(1, cmd.nights);
   const toDate = addDaysIso(fromDate, nights);
 
+  const inferredGuestSex = state.roomCategories.find((c) => c.id === room.categoryId)?.femaleOnly
+    ? ('F' as const)
+    : ('M' as const);
+
   const conflicts = findRoomConflicts(state.bookings, cmd.roomId, cmd.bedId, fromDate, toDate);
   if (conflicts.length > 0) {
     return state;
@@ -1108,7 +1116,7 @@ export function handleCommitParsedCommand(
         age: 28,
         passportNo: `W${Math.floor(1000000 + Math.random() * 8999999)}`,
         dob: '1998-05-10',
-        sex: 'M',
+        sex: inferredGuestSex,
         isForeigner: true,
         emehmonRegistered: false,
         emehmonCheckedOut: false,

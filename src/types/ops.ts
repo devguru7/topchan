@@ -1,6 +1,8 @@
 export type TabId = 'grid' | 'shift' | 'cash' | 'services' | 'guests' | 'settings';
 
-export type AppUserRole = 'admin' | 'manager' | 'housekeeping';
+export type AppUserRole = 'admin' | 'manager' | 'housekeeping' | 'cook';
+
+export type DietaryTag = 'halal' | 'vegetarian' | 'no_pork' | 'gluten_free' | 'allergy';
 
 export type RoomStatus = 'available' | 'occupied' | 'dirty' | 'maintenance';
 
@@ -82,6 +84,8 @@ export interface StayGuest {
   registrationSlipPrinted: boolean;
   keyIssued: boolean;
   segmentId?: string;
+  dietaryTags?: DietaryTag[];
+  dietaryNote?: string;
 }
 
 export interface LedgerEntry {
@@ -109,8 +113,9 @@ export interface BookingGroup {
   id: string;
   propertyId: string;
   bnovoId: string;
-  status: 'active' | 'checked_out' | 'cancelled';
+  status: 'active' | 'confirmed' | 'pending' | 'checked_out' | 'cancelled';
   checkOutTime: string; // e.g. "12:00"
+  expectedArrivalTime?: string; // HH:mm e.g. "08:30" or "14:00"
   checkingOutToday: boolean;
   source: 'Bnovo' | 'Walk-in' | 'QR Direct' | 'Telegram';
   notes?: string;
@@ -118,6 +123,26 @@ export interface BookingGroup {
   guests: StayGuest[];
   ledgerEntries: LedgerEntry[];
   createdAt: string;
+}
+
+export interface LateBreakfastOrder {
+  id: string;
+  propertyId: string;
+  bookingId: string;
+  roomLabel: string;
+  portions: number;
+  requestedAt: string; // HH:mm or ISO
+  status: 'pending' | 'served';
+  servedAt?: string;
+  note?: string;
+}
+
+export interface KitchenChecklistItem {
+  id: string;
+  time: string;
+  title: string;
+  done: boolean;
+  doneAt?: string;
 }
 
 export interface GuestProfile {
@@ -385,6 +410,8 @@ export interface AppState {
   emergencyContacts: EmergencyContact[];
   telegramAlerts: TelegramAlert[];
   shiftChecklist: ShiftChecklistItem[];
+  lateBreakfastOrders?: LateBreakfastOrder[];
+  kitchenChecklist?: KitchenChecklistItem[];
   auditLog: AuditLogEntry[];
   currency: CurrencySettings;
   integrations: IntegrationSettings;
