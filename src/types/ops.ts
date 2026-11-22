@@ -74,7 +74,7 @@ export interface StayGuest {
   age: number;
   passportNo: string;
   dob: string; // YYYY-MM-DD
-  sex?: 'M' | 'F';
+  sex?: 'M' | 'F' | 'X';
   isForeigner: boolean;
   mrzRaw?: string;
   emehmonRegistered: boolean;
@@ -426,9 +426,10 @@ export interface MrzResult {
   nationality: string;
   dob: string; // YYYY-MM-DD
   age: number;
-  sex: 'M' | 'F';
+  sex: 'M' | 'F' | 'X';
   expiryDate: string; // YYYY-MM-DD
   isForeigner: boolean;
+  isStateless?: boolean;
   raw: string;
 }
 

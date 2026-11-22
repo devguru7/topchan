@@ -70,11 +70,20 @@ export function migrateAppState(raw: unknown): AppState | null {
       typeof state.operationalDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(state.operationalDate)
         ? state.operationalDate
         : getTashkentTodayIso(),
+    transactions: Array.isArray(state.transactions) ? state.transactions : [],
+    safeCollections: Array.isArray(state.safeCollections) ? state.safeCollections : [],
+    laundryJobs: Array.isArray(state.laundryJobs) ? state.laundryJobs : [],
+    housekeepingTasks: Array.isArray(state.housekeepingTasks) ? state.housekeepingTasks : [],
     luggageItems: Array.isArray(state.luggageItems) ? state.luggageItems : [],
     lostFoundItems: Array.isArray(state.lostFoundItems) ? state.lostFoundItems : [],
     shiftHistory: Array.isArray(state.shiftHistory) ? state.shiftHistory : [],
     mailInbox: Array.isArray(state.mailInbox) ? state.mailInbox : [],
     guestProfiles: Array.isArray(state.guestProfiles) ? state.guestProfiles : [],
+    transfers: Array.isArray(state.transfers) ? state.transfers : [],
+    stockItems: Array.isArray(state.stockItems) ? state.stockItems : [],
+    telegramAlerts: Array.isArray(state.telegramAlerts) ? state.telegramAlerts : [],
+    shiftChecklist: Array.isArray(state.shiftChecklist) ? state.shiftChecklist : [],
+    auditLog: Array.isArray(state.auditLog) ? state.auditLog : [],
     pockets,
   };
 }

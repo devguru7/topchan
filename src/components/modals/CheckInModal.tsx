@@ -113,7 +113,7 @@ export const CheckInModal: React.FC = () => {
   const [passportNo, setPassportNo] = useState('');
   const [dob, setDob] = useState('1994-05-15');
   const [age, setAge] = useState(32);
-  const [sex, setSex] = useState<'M' | 'F'>('M');
+  const [sex, setSex] = useState<'M' | 'F' | 'X'>('M');
 
   // Payment
   const [payNow, setPayNow] = useState(true);
@@ -179,10 +179,12 @@ export const CheckInModal: React.FC = () => {
       setAge(res.age);
       setSex(res.sex);
       setChkOriginalPassport(true);
+      const sexLabel = res.sex === 'F' ? 'Жен' : res.sex === 'M' ? 'Муж' : 'Пол не указан (X)';
+      const warnNeeded = !res.checkDigits.allValid || res.sex === 'X' || Boolean(res.isStateless);
       pushToast(
-        res.checkDigits.allValid ? 'MRZ распознан (ICAO OK)' : 'MRZ распознан (проверьте цифры)',
-        `${res.fullName} · ${res.passportNo} (${res.nationality}, ${res.sex === 'F' ? 'Жен' : 'Муж'})`,
-        res.checkDigits.allValid ? 'emerald' : 'amber'
+        warnNeeded ? 'MRZ распознан — проверьте данные' : 'MRZ распознан (ICAO OK)',
+        `${res.fullName} · ${res.passportNo} (${res.nationality}, ${sexLabel})`,
+        warnNeeded ? 'amber' : 'emerald'
       );
     }
   };
@@ -610,7 +612,7 @@ export const CheckInModal: React.FC = () => {
                             }}
                           >
                             {mrzParsed.valid
-                              ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ${mrzParsed.sex === 'F' ? 'Жен' : 'Муж'} · ДР ${mrzParsed.dob}`
+                              ? `Распознано: ${mrzParsed.surname} ${mrzParsed.givenName} · ${mrzParsed.passportNo} · ${mrzParsed.nationality} · ${mrzParsed.sex === 'F' ? 'Жен' : mrzParsed.sex === 'M' ? 'Муж' : 'Пол не указан (X)'} · ДР ${mrzParsed.dob}`
                               : mrzParsed.error}
                           </span>
                           {mrzParsed.valid && (
@@ -716,11 +718,12 @@ export const CheckInModal: React.FC = () => {
                           </label>
                           <select
                             value={sex}
-                            onChange={(e) => setSex(e.target.value as 'M' | 'F')}
+                            onChange={(e) => setSex(e.target.value as 'M' | 'F' | 'X')}
                             className="ops-input w-full px-3 py-2.5 text-sm"
                           >
                             <option value="M">Мужской (M)</option>
                             <option value="F">Женский (F)</option>
+                            <option value="X">Не указан (X — проверить)</option>
                           </select>
                         </div>
                         <div>

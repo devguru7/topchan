@@ -3,6 +3,7 @@ import { getTashkentYear } from './time';
 import {
   buildValidTd3Mrz,
   computeMrzCheckDigit,
+  parseMrzDate,
   parseTd3MrzStrict,
   SAMPLE_MRZ_FEMALE_DE,
   SAMPLE_MRZ_ITALY,
@@ -15,6 +16,7 @@ import {
 export {
   buildValidTd3Mrz,
   computeMrzCheckDigit,
+  parseMrzDate,
   parseTd3MrzStrict,
   SAMPLE_MRZ_FEMALE_DE,
   SAMPLE_MRZ_ITALY,
@@ -25,8 +27,14 @@ export {
 };
 
 /**
- * Compatibility wrapper around `parseTd3MrzStrict` preserving existing signature.
+ * Strict ICAO 9303 TD3 MRZ parser wrapper.
+ * Enforces check-digit validation by default (`requireValidCheckDigits: true`)
+ * so corrupted or mistyped MRZ strings never silently enter guest/E-mehmon cards.
  */
-export function parseTd3Mrz(input: string, refYear = getTashkentYear()): MrzResult {
-  return parseTd3MrzStrict(input, { refYear, requireValidCheckDigits: false });
+export function parseTd3Mrz(
+  input: string,
+  refYear = getTashkentYear(),
+  requireValidCheckDigits = true
+): MrzResult {
+  return parseTd3MrzStrict(input, { refYear, requireValidCheckDigits });
 }

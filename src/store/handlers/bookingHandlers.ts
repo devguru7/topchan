@@ -24,15 +24,16 @@ import {
 export function validateFemaleOnlyRoom(
   state: AppState,
   roomId: string,
-  guests: Array<{ fullName: string; sex?: 'M' | 'F' }>
+  guests: Array<{ fullName: string; sex?: 'M' | 'F' | 'X' }>
 ): string | null {
   const room = state.physicalRooms.find((r) => r.id === roomId);
   if (!room) return null;
   const cat = state.roomCategories.find((c) => c.id === room.categoryId);
   if (!cat?.femaleOnly) return null;
-  const maleGuest = guests.find((g) => g.sex === 'M');
-  if (maleGuest) {
-    return `Женский дорм (${room.code}) предназначен только для женщин — гость ${maleGuest.fullName} (M) не может быть размещён сюда.`;
+  const nonFemaleGuest = guests.find((g) => g.sex === 'M' || g.sex === 'X');
+  if (nonFemaleGuest) {
+    const label = nonFemaleGuest.sex === 'X' ? 'пол не указан (X)' : 'M';
+    return `Женский дорм (${room.code}) предназначен только для женщин — гость ${nonFemaleGuest.fullName} (${label}) не может быть размещён сюда без подтверждения пола (F).`;
   }
   return null;
 }

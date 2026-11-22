@@ -53,7 +53,7 @@ export function buildValidTd3Mrz(params: {
   passportNo: string;
   nationality: string;
   dobYymmdd: string;
-  sex: 'M' | 'F';
+  sex: 'M' | 'F' | '<' | 'X';
   expiryYymmdd: string;
 }): string {
   const iss = params.issuingState.toUpperCase().replace(/[^A-Z]/g, '').padEnd(3, '<').slice(0, 3);
@@ -72,8 +72,9 @@ export function buildValidTd3Mrz(params: {
   const optCd = String(computeMrzCheckDigit(optional));
   const compositeInput = `${passField}${passCd}${dob}${dobCd}${exp}${expCd}${optional}${optCd}`;
   const compositeCd = String(computeMrzCheckDigit(compositeInput));
+  const sexChar = params.sex === 'F' ? 'F' : params.sex === 'M' ? 'M' : '<';
 
-  const line2 = `${passField}${passCd}${nat}${dob}${dobCd}${params.sex}${exp}${expCd}${optional}${optCd}${compositeCd}`;
+  const line2 = `${passField}${passCd}${nat}${dob}${dobCd}${sexChar}${exp}${expCd}${optional}${optCd}${compositeCd}`;
   return `${line1}\n${line2}`;
 }
 
@@ -110,23 +111,46 @@ export const SAMPLE_MRZ_FEMALE_DE = buildValidTd3Mrz({
   expiryYymmdd: '300814',
 });
 
-function parseMrzDate(yymmdd: string, isExpiry: boolean, refYear = getTashkentYear()): string {
-  const yy = parseInt(yymmdd.slice(0, 2), 10);
-  const mm = yymmdd.slice(2, 4);
-  const dd = yymmdd.slice(4, 6);
-  if (Number.isNaN(yy)) return '1990-01-01';
+/**
+ * Validates and converts an ICAO 9303 YYMMDD date to YYYY-MM-DD.
+ * Returns null if month (01-12), day (01-31), or real calendar date (e.g. Feb 31) is invalid.
+ */
+export function parseMrzDate(
+  yymmdd: string,
+  isExpiry: boolean,
+  refYear = getTashkentYear()
+): string | null {
+  if (!/^\d{6}$/.test(yymmdd)) return null;
+  const yy = Number.parseInt(yymmdd.slice(0, 2), 10);
+  const mmNum = Number.parseInt(yymmdd.slice(2, 4), 10);
+  const ddNum = Number.parseInt(yymmdd.slice(4, 6), 10);
+
+  if (mmNum < 1 || mmNum > 12 || ddNum < 1 || ddNum > 31) {
+    return null;
+  }
+
   const currentTwoDigit = refYear % 100;
   const fullYear = isExpiry
     ? 2000 + yy
     : yy > currentTwoDigit
       ? 1900 + yy
       : 2000 + yy;
-  return `${fullYear}-${mm}-${dd}`;
+
+  const calendarDate = new Date(Date.UTC(fullYear, mmNum - 1, ddNum));
+  if (
+    calendarDate.getUTCFullYear() !== fullYear ||
+    calendarDate.getUTCMonth() !== mmNum - 1 ||
+    calendarDate.getUTCDate() !== ddNum
+  ) {
+    return null;
+  }
+
+  return `${fullYear}-${String(mmNum).padStart(2, '0')}-${String(ddNum).padStart(2, '0')}`;
 }
 
 function calcAgeFromDob(dob: string, refYear = getTashkentYear()): number {
-  const year = parseInt(dob.slice(0, 4), 10);
-  if (Number.isNaN(year)) return 25;
+  const year = Number.parseInt(dob.slice(0, 4), 10);
+  if (Number.isNaN(year)) return 0;
   return Math.max(0, refYear - year);
 }
 
@@ -146,16 +170,18 @@ const EMPTY_CHECK_DIGITS: MrzCheckDigits = {
   allValid: false,
 };
 
+const STATELESS_CODES = new Set(['XXA', 'XXB', 'XXC', 'XXX']);
+
 /**
- * Full ICAO 9303 TD3 parser with strict 7-3-1 mod 10 check-digit verification.
- * When `requireValidCheckDigits` is true, invalid check digits mark `valid = false`.
+ * Full ICAO 9303 TD3 parser with strict 7-3-1 mod 10 check-digit verification,
+ * real calendar date validation, explicit unspecified sex ('X'), and stateless nationality support.
  */
 export function parseTd3MrzStrict(
   input: string,
   options?: { refYear?: number; requireValidCheckDigits?: boolean }
 ): StrictMrzResult {
   const refYear = options?.refYear ?? getTashkentYear();
-  const requireValidCheckDigits = options?.requireValidCheckDigits ?? false;
+  const requireValidCheckDigits = options?.requireValidCheckDigits ?? true;
 
   const lines = input
     .trim()
@@ -176,9 +202,10 @@ export function parseTd3MrzStrict(
       nationality: '',
       dob: '',
       age: 0,
-      sex: 'M',
+      sex: 'X',
       expiryDate: '',
       isForeigner: true,
+      isStateless: false,
       raw: input,
       personalNumber: '',
       checkDigits: EMPTY_CHECK_DIGITS,
@@ -199,7 +226,10 @@ export function parseTd3MrzStrict(
   const passportField = line2.slice(0, 9);
   const passportCheckChar = line2.slice(9, 10);
   const passportNo = passportField.replace(/</g, '');
-  const nationality = line2.slice(10, 13).replace(/</g, '') || issuingState || 'UNK';
+  const rawNationality = line2.slice(10, 13).replace(/</g, '');
+  const isStateless = rawNationality === '' || STATELESS_CODES.has(rawNationality);
+  const nationality = rawNationality === '' ? 'STATELESS' : rawNationality;
+
   const dobRaw = line2.slice(13, 19);
   const dobCheckChar = line2.slice(19, 20);
   const sexRaw = line2.slice(20, 21);
@@ -208,6 +238,9 @@ export function parseTd3MrzStrict(
   const personalField = line2.slice(28, 42);
   const personalCheckChar = line2.slice(42, 43);
   const compositeCheckChar = line2.slice(43, 44);
+
+  const sex: 'M' | 'F' | 'X' = sexRaw === 'F' ? 'F' : sexRaw === 'M' ? 'M' : 'X';
+  const isForeigner = isStateless || nationality !== 'UZB';
 
   const passportValid = verifyMrzCheckDigit(passportField, passportCheckChar);
   const dobValid = /^\d{6}$/.test(dobRaw) && verifyMrzCheckDigit(dobRaw, dobCheckChar);
@@ -223,10 +256,10 @@ export function parseTd3MrzStrict(
     allValid: passportValid && dobValid && expiryValid && compositeValid,
   };
 
-  if (!passportNo || !surname || !/^\d{6}$/.test(dobRaw)) {
+  if (!passportNo || !surname) {
     return {
       valid: false,
-      error: 'Не удалось распознать номер паспорта, фамилию или дату рождения из MRZ',
+      error: 'Не удалось распознать номер паспорта или фамилию из MRZ',
       documentType,
       issuingState,
       surname,
@@ -236,22 +269,65 @@ export function parseTd3MrzStrict(
       nationality,
       dob: '',
       age: 0,
-      sex: 'M',
+      sex,
       expiryDate: '',
-      isForeigner: nationality !== 'UZB',
-      raw: input,
+      isForeigner,
+      isStateless,
+      raw: `${line1}\n${line2}`,
       personalNumber: personalField.replace(/</g, ''),
       checkDigits,
     };
   }
 
   const dob = parseMrzDate(dobRaw, false, refYear);
-  const expiryDate = /^\d{6}$/.test(expiryRaw)
-    ? parseMrzDate(expiryRaw, true, refYear)
-    : `${refYear + 5}-01-01`;
-  const sex: 'M' | 'F' = sexRaw === 'F' ? 'F' : 'M';
+  if (!dob) {
+    return {
+      valid: false,
+      error: `Некорректная дата рождения в MRZ (${dobRaw})`,
+      documentType,
+      issuingState,
+      surname,
+      givenName,
+      fullName: fullName || surname,
+      passportNo,
+      nationality,
+      dob: '',
+      age: 0,
+      sex,
+      expiryDate: '',
+      isForeigner,
+      isStateless,
+      raw: `${line1}\n${line2}`,
+      personalNumber: personalField.replace(/</g, ''),
+      checkDigits,
+    };
+  }
+
+  const expiryDate = parseMrzDate(expiryRaw, true, refYear);
+  if (!expiryDate) {
+    return {
+      valid: false,
+      error: `Некорректный срок действия паспорта в MRZ (${expiryRaw})`,
+      documentType,
+      issuingState,
+      surname,
+      givenName,
+      fullName: fullName || surname,
+      passportNo,
+      nationality,
+      dob,
+      age: calcAgeFromDob(dob, refYear),
+      sex,
+      expiryDate: '',
+      isForeigner,
+      isStateless,
+      raw: `${line1}\n${line2}`,
+      personalNumber: personalField.replace(/</g, ''),
+      checkDigits,
+    };
+  }
+
   const age = calcAgeFromDob(dob, refYear);
-  const isForeigner = nationality !== 'UZB';
 
   if (requireValidCheckDigits && !checkDigits.allValid) {
     const failedParts: string[] = [];
@@ -274,6 +350,7 @@ export function parseTd3MrzStrict(
       sex,
       expiryDate,
       isForeigner,
+      isStateless,
       raw: `${line1}\n${line2}`,
       personalNumber: personalField.replace(/</g, ''),
       checkDigits,
@@ -294,6 +371,7 @@ export function parseTd3MrzStrict(
     sex,
     expiryDate,
     isForeigner,
+    isStateless,
     raw: `${line1}\n${line2}`,
     personalNumber: personalField.replace(/</g, ''),
     checkDigits,

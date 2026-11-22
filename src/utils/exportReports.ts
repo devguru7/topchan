@@ -3,14 +3,20 @@ import {
   calcBookingTotals,
   calcBookingTouristTaxUzs,
   calcTouristTaxPerNightUzs,
+  countUniqueSegmentNights,
   round2,
 } from './math';
-import { diffDaysIso, getTashkentTodayIso } from './time';
+import { getTashkentTodayIso } from './time';
 
 const UTF8_BOM = '\uFEFF';
+const CSV_FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
 
-function escapeCsvCell(value: string | number | boolean | null | undefined): string {
-  const str = value === null || value === undefined ? '' : String(value);
+export function escapeCsvCell(value: string | number | boolean | null | undefined): string {
+  let str = value === null || value === undefined ? '' : String(value);
+  // Prevent CSV / Excel Formula Injection (=, +, -, @, TAB, CR)
+  if (str.length > 0 && CSV_FORMULA_PREFIX_RE.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\r\n;]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -28,13 +34,42 @@ function toCsvLines(
   return `${UTF8_BOM}${lines.join('\r\n')}\r\n`;
 }
 
+function formatBookingStatusLabel(
+  status: string,
+  earliestFromDate: string | undefined,
+  todayIso: string
+): string {
+  if (status === 'checked_out') return 'Выехал';
+  if (status === 'confirmed' || status === 'pending') return 'Ожидается заезд';
+  if (status === 'active') {
+    if (earliestFromDate && earliestFromDate > todayIso) {
+      return 'Ожидается заезд';
+    }
+    return 'Проживает';
+  }
+  return 'Выехал';
+}
+
+function formatTouristTaxRateLabel(
+  guest: { age: number; isForeigner: boolean },
+  activePhysicalCount: number
+): string {
+  if (guest.age < 16) return '0% (до 16 лет)';
+  if (!guest.isForeigner) return '0.4% (РУз)';
+  if (activePhysicalCount <= 10) return '5% (до 10 комн.)';
+  if (activePhysicalCount <= 40) return '10% (11–40 комн.)';
+  return '10% (41+ комн.)';
+}
+
 /**
  * Generates an E-mehmon / Uzbekistan Tourist Tax CSV report (UTF-8 BOM for Excel).
- * Uses BCV (БРВ) = 440,000 UZS, 0.4% UZB / 10% Foreigners (11-40 room bracket), age <16 exempt.
+ * Uses BCV (БРВ) = 440,000 UZS, 0.4% UZB / 5% (<=10 rooms) / 10% (11+ rooms) Foreigners, age <16 exempt.
+ * Uses countUniqueSegmentNights so parallel multi-room bookings never double-count nights.
  */
 export function buildTouristTaxCsv(state: AppState): string {
   const activePhysicalCount = state.physicalRooms.filter((r) => !r.archived).length;
   const bcvUzs = state.currency.bcvUzs;
+  const todayIso = state.operationalDate ?? getTashkentTodayIso();
   const headers = [
     'Бронь',
     'Статус',
@@ -56,32 +91,38 @@ export function buildTouristTaxCsv(state: AppState): string {
 
   for (const bkg of state.bookings) {
     if (bkg.status === 'cancelled') continue;
-    const nights = Math.max(
-      1,
-      bkg.segments.reduce((acc, s) => acc + Math.max(1, diffDaysIso(s.fromDate, s.toDate)), 0)
+    if (bkg.segments.length === 0 || bkg.guests.length === 0) continue;
+
+    const sharedUniqueNights = countUniqueSegmentNights(bkg.segments);
+    const earliestFromDate = bkg.segments.reduce<string | undefined>(
+      (min, s) => (!min || (s.fromDate && s.fromDate < min) ? s.fromDate : min),
+      undefined
     );
+    const statusLabel = formatBookingStatusLabel(bkg.status, earliestFromDate, todayIso);
+
     for (const guest of bkg.guests) {
+      let guestNights = sharedUniqueNights;
+      if (guest.segmentId) {
+        const assignedSeg = bkg.segments.find((s) => s.id === guest.segmentId);
+        if (assignedSeg) {
+          guestNights = countUniqueSegmentNights([assignedSeg]);
+        }
+      }
+
       const dailyUzs = calcTouristTaxPerNightUzs(guest, bcvUzs, activePhysicalCount);
-      const totalUzs = dailyUzs * nights;
+      const totalUzs = dailyUzs * guestNights;
       grandTotalUzs += totalUzs;
-      const pct =
-        guest.age < 16
-          ? '0% (до 16 лет)'
-          : !guest.isForeigner
-            ? '0.4% (РУз)'
-            : activePhysicalCount <= 10
-              ? '5% (до 10 комн.)'
-              : '10% (11–40 комн.)';
+
       rows.push([
         bkg.bnovoId,
-        bkg.status === 'active' ? 'Проживает' : 'Выехал',
+        statusLabel,
         guest.fullName,
         guest.citizenship,
         guest.passportNo,
         guest.age,
         guest.isForeigner ? 'Иностранец' : 'Гражданин РУз',
-        nights,
-        pct,
+        guestNights,
+        formatTouristTaxRateLabel(guest, activePhysicalCount),
         bcvUzs,
         dailyUzs,
         totalUzs,
@@ -90,7 +131,8 @@ export function buildTouristTaxCsv(state: AppState): string {
     }
   }
 
-  const activeBookingsTax = state.bookings
+  // Reconcile strictly with calcBookingTouristTaxUzs (zero double-count, zero Math.max inflation)
+  const expectedTotalUzs = state.bookings
     .filter((b) => b.status !== 'cancelled')
     .reduce((sum, b) => sum + calcBookingTouristTaxUzs(b, bcvUzs, activePhysicalCount), 0);
 
@@ -106,7 +148,7 @@ export function buildTouristTaxCsv(state: AppState): string {
     '',
     bcvUzs,
     '',
-    Math.max(grandTotalUzs, activeBookingsTax),
+    grandTotalUzs === expectedTotalUzs ? grandTotalUzs : expectedTotalUzs,
     '',
   ]);
 

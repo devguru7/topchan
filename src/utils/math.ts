@@ -70,7 +70,7 @@ export function calcTouristTaxPerNightUzs(
   return Math.round(bcvUzs * rate);
 }
 
-function countUniqueSegmentNights(segments: StaySegment[]): number {
+export function countUniqueSegmentNights(segments: StaySegment[]): number {
   if (segments.length === 0) return 0;
 
   const uniqueNights = new Set<string>();

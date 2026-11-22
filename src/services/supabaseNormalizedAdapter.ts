@@ -12,24 +12,38 @@ export type NormalizedTableName =
 export interface OfflineMutationItem {
   id: string;
   table: NormalizedTableName;
-  operation: 'upsert' | 'insert';
+  operation: 'upsert' | 'insert' | 'delete';
   rows: Array<Record<string, unknown>>;
+  deleteIds?: string[];
+  propertyId?: string;
+  attempts?: number;
+  lastError?: string;
   createdAt: string;
 }
 
 export interface OfflineSyncStatus {
   isOnline: boolean;
   pendingCount: number;
+  failedCount: number;
   lastFlushedAt?: string;
   realtimeConnected: boolean;
 }
 
-const OFFLINE_QUEUE_KEY = 'topchan_offline_queue_v1';
+interface PostTableOutcome {
+  ok: boolean;
+  status: number;
+  permanentError: boolean;
+  error?: string;
+}
 
-function readQueue(): OfflineMutationItem[] {
+const OFFLINE_QUEUE_KEY = 'topchan_offline_queue_v1';
+const FAILED_QUEUE_KEY = 'topchan_offline_failed_queue_v1';
+const MAX_RETRY_ATTEMPTS = 5;
+
+function readStorageArray(key: string): OfflineMutationItem[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem(OFFLINE_QUEUE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as OfflineMutationItem[]) : [];
@@ -38,21 +52,31 @@ function readQueue(): OfflineMutationItem[] {
   }
 }
 
-function writeQueue(items: OfflineMutationItem[]): void {
+function writeStorageArray(key: string, items: OfflineMutationItem[], maxItems = 200): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items.slice(-150)));
+    window.localStorage.setItem(key, JSON.stringify(items.slice(-maxItems)));
   } catch {
     // Ignore storage quota issues in restricted environments
   }
 }
 
 /**
+ * Classifies an HTTP status code as a permanent client/RLS error (4xx except 408/429)
+ * versus a transient retryable error (network error / 408 / 429 / 5xx).
+ */
+export function isPermanentHttpError(status: number): boolean {
+  if (status === 408 || status === 429) return false;
+  return status >= 400 && status < 500;
+}
+
+/**
  * Maps current in-memory AppState into normalized relational table rows matching supabase/schema.sql.
  */
-export function projectStateToNormalizedRows(state: AppState): Record<NormalizedTableName, Array<Record<string, unknown>>> {
+export function projectStateToNormalizedRows(
+  state: AppState
+): Record<NormalizedTableName, Array<Record<string, unknown>>> {
   const propertyId = state.propertyId;
-
   const opDate = state.operationalDate ?? new Date().toISOString().slice(0, 10);
 
   const booking_groups = state.bookings.map((b) => {
@@ -155,28 +179,42 @@ export function projectStateToNormalizedRows(state: AppState): Record<Normalized
 }
 
 /**
- * Normalized Supabase table synchronizer + persistent Offline Mutation Queue + Realtime poller.
- * Gracefully degrades to local offline-first queue when Supabase env vars are not configured.
+ * Normalized Supabase table synchronizer + persistent Offline Mutation Queue + real WebSocket Realtime channel
+ * with 15-second REST polling strictly as fallback when WebSocket is disconnected.
  */
 export class SupabaseNormalizedSync {
   private readonly baseUrl: string | null;
   private readonly anonKey: string | null;
+  private readonly fetchImpl: typeof fetch;
   private accessToken: string | null = null;
-  private queue: OfflineMutationItem[] = readQueue();
+  private queue: OfflineMutationItem[] = readStorageArray(OFFLINE_QUEUE_KEY);
+  private failedQueue: OfflineMutationItem[] = readStorageArray(FAILED_QUEUE_KEY);
   private isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private lastFlushedAt?: string;
   private realtimeConnected = false;
   private flushing = false;
   private readonly listeners = new Set<(status: OfflineSyncStatus) => void>();
-  private pollTimer: number | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private ws: WebSocket | null = null;
   private onlineHandler: (() => void) | null = null;
   private offlineHandler: (() => void) | null = null;
+  private seqCounter = 0;
 
-  constructor(supabaseUrl?: string, anonKey?: string) {
+  constructor(
+    supabaseUrl?: string,
+    anonKey?: string,
+    options?: { fetchImpl?: typeof fetch; initialOnline?: boolean }
+  ) {
     const cleanUrl = supabaseUrl?.trim();
     const cleanKey = anonKey?.trim();
     this.baseUrl = cleanUrl && cleanUrl.startsWith('https://') ? cleanUrl.replace(/\/+$/, '') : null;
     this.anonKey = cleanKey || null;
+    this.fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    if (typeof options?.initialOnline === 'boolean') {
+      this.isOnline = options.initialOnline;
+    }
     this.bindNetworkListeners();
   }
 
@@ -191,10 +229,33 @@ export class SupabaseNormalizedSync {
     }
   }
 
+  setOnlineStatus(online: boolean): void {
+    this.isOnline = online;
+    if (!online) {
+      this.realtimeConnected = false;
+    }
+    this.emit();
+  }
+
+  getQueue(): OfflineMutationItem[] {
+    return [...this.queue];
+  }
+
+  getFailedQueue(): OfflineMutationItem[] {
+    return [...this.failedQueue];
+  }
+
+  clearFailedQueue(): void {
+    this.failedQueue = [];
+    writeStorageArray(FAILED_QUEUE_KEY, this.failedQueue, 100);
+    this.emit();
+  }
+
   getStatus(): OfflineSyncStatus {
     return {
       isOnline: this.isOnline,
       pendingCount: this.queue.length,
+      failedCount: this.failedQueue.length,
       lastFlushedAt: this.lastFlushedAt,
       realtimeConnected: this.realtimeConnected,
     };
@@ -233,8 +294,12 @@ export class SupabaseNormalizedSync {
 
   /**
    * Enqueues normalized relational table mutations and flushes immediately when online + configured.
+   * NEVER overwrites/deduplicates `insert` operations or `audit_log` rows so audit history is never lost.
    */
-  enqueueNormalizedSync(state: AppState, tables: NormalizedTableName[] = ['booking_groups', 'stay_segments', 'housekeeping_tasks']): void {
+  enqueueNormalizedSync(
+    state: AppState,
+    tables: NormalizedTableName[] = ['booking_groups', 'stay_segments', 'housekeeping_tasks']
+  ): void {
     if (!this.isConfigured) return;
     const projected = projectStateToNormalizedRows(state);
     const now = new Date().toISOString();
@@ -242,18 +307,55 @@ export class SupabaseNormalizedSync {
     for (const table of tables) {
       const rows = projected[table];
       if (!rows || rows.length === 0) continue;
-      // Deduplicate pending upsert for the same table to avoid queue bloat
-      this.queue = this.queue.filter((item) => item.table !== table);
+      const operation: OfflineMutationItem['operation'] = table === 'audit_log' ? 'insert' : 'upsert';
+
+      // Only deduplicate idempotent upserts on non-audit tables; NEVER drop `insert` or `audit_log` entries
+      if (operation === 'upsert' && table !== 'audit_log') {
+        this.queue = this.queue.filter(
+          (item) => !(item.table === table && item.operation === 'upsert')
+        );
+      }
+
       this.queue.push({
-        id: `oq-${table}-${Date.now()}`,
+        id: `oq-${table}-${Date.now()}-${++this.seqCounter}`,
         table,
-        operation: table === 'audit_log' ? 'insert' : 'upsert',
+        operation,
         rows,
+        propertyId: state.propertyId,
+        attempts: 0,
         createdAt: now,
       });
     }
 
-    writeQueue(this.queue);
+    writeStorageArray(OFFLINE_QUEUE_KEY, this.queue);
+    this.emit();
+
+    if (this.isOnline) {
+      void this.flushQueue();
+    }
+  }
+
+  /**
+   * Enqueues a normalized table DELETE mutation so removed bookings, guests, payments, or rooms
+   * do not remain orphaned in Supabase.
+   */
+  enqueueDelete(table: NormalizedTableName, ids: string[], propertyId?: string): void {
+    if (!this.isConfigured) return;
+    const cleanIds = ids.map((id) => id.trim()).filter(Boolean);
+    if (cleanIds.length === 0) return;
+
+    this.queue.push({
+      id: `oq-del-${table}-${Date.now()}-${++this.seqCounter}`,
+      table,
+      operation: 'delete',
+      rows: [],
+      deleteIds: cleanIds,
+      propertyId,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+    });
+
+    writeStorageArray(OFFLINE_QUEUE_KEY, this.queue);
     this.emit();
 
     if (this.isOnline) {
@@ -270,16 +372,40 @@ export class SupabaseNormalizedSync {
 
     try {
       const remaining: OfflineMutationItem[] = [];
+      let failedChanged = false;
+
       for (const item of this.queue) {
-        const ok = await this.postNormalizedTable(item);
-        if (ok) {
+        const outcome = await this.postNormalizedTable(item);
+        if (outcome.ok) {
           flushedCount += 1;
+          continue;
+        }
+
+        const nextAttempts = (item.attempts ?? 0) + 1;
+        const updatedItem: OfflineMutationItem = {
+          ...item,
+          attempts: nextAttempts,
+          lastError: outcome.error ?? `HTTP ${outcome.status}`,
+        };
+
+        // Permanent 4xx validation/RLS error OR exceeded retry budget -> quarantine in failedQueue
+        if (outcome.permanentError || nextAttempts >= MAX_RETRY_ATTEMPTS) {
+          console.error(
+            `[Topchan Sync] Quarantining ${item.operation} on ${item.table} (${item.id}) after ${nextAttempts} attempt(s): ${updatedItem.lastError}`
+          );
+          this.failedQueue.push(updatedItem);
+          failedChanged = true;
         } else {
-          remaining.push(item);
+          // Transient network / 408 / 429 / 5xx error -> keep in queue for retry
+          remaining.push(updatedItem);
         }
       }
+
       this.queue = remaining;
-      writeQueue(this.queue);
+      writeStorageArray(OFFLINE_QUEUE_KEY, this.queue);
+      if (failedChanged) {
+        writeStorageArray(FAILED_QUEUE_KEY, this.failedQueue, 100);
+      }
       if (flushedCount > 0) {
         this.lastFlushedAt = new Date().toISOString();
       }
@@ -291,16 +417,51 @@ export class SupabaseNormalizedSync {
     return flushedCount;
   }
 
-  private async postNormalizedTable(item: OfflineMutationItem): Promise<boolean> {
-    if (!this.baseUrl || !this.anonKey) return false;
+  private async postNormalizedTable(item: OfflineMutationItem): Promise<PostTableOutcome> {
+    if (!this.baseUrl || !this.anonKey) {
+      return { ok: false, status: 0, permanentError: false, error: 'Supabase not configured' };
+    }
     const bearer = this.accessToken?.trim() || this.anonKey;
-    const preferHeader =
-      item.operation === 'upsert'
-        ? 'resolution=merge-duplicates,return=minimal'
-        : 'resolution=ignore-duplicates,return=minimal';
 
     try {
-      const res = await fetch(`${this.baseUrl}/rest/v1/${item.table}`, {
+      if (item.operation === 'delete') {
+        const ids = item.deleteIds ?? [];
+        if (ids.length === 0) {
+          return { ok: true, status: 204, permanentError: false };
+        }
+        const encodedIds = ids.map((id) => encodeURIComponent(id)).join(',');
+        const propFilter = item.propertyId
+          ? `&property_id=eq.${encodeURIComponent(item.propertyId)}`
+          : '';
+        const res = await this.fetchImpl(
+          `${this.baseUrl}/rest/v1/${item.table}?id=in.(${encodedIds})${propFilter}`,
+          {
+            method: 'DELETE',
+            headers: {
+              apikey: this.anonKey,
+              Authorization: `Bearer ${bearer}`,
+              Prefer: 'return=minimal',
+            },
+          }
+        );
+        if (res.ok) {
+          return { ok: true, status: res.status, permanentError: false };
+        }
+        const errText = await res.text().catch(() => '');
+        return {
+          ok: false,
+          status: res.status,
+          permanentError: isPermanentHttpError(res.status),
+          error: `HTTP ${res.status}: ${errText.slice(0, 180)}`,
+        };
+      }
+
+      const preferHeader =
+        item.operation === 'upsert'
+          ? 'resolution=merge-duplicates,return=minimal'
+          : 'resolution=ignore-duplicates,return=minimal';
+
+      const res = await this.fetchImpl(`${this.baseUrl}/rest/v1/${item.table}`, {
         method: 'POST',
         headers: {
           apikey: this.anonKey,
@@ -310,28 +471,182 @@ export class SupabaseNormalizedSync {
         },
         body: JSON.stringify(item.rows),
       });
-      return res.ok;
-    } catch {
-      return false;
+
+      if (res.ok) {
+        return { ok: true, status: res.status, permanentError: false };
+      }
+
+      const errText = await res.text().catch(() => '');
+      return {
+        ok: false,
+        status: res.status,
+        permanentError: isPermanentHttpError(res.status),
+        error: `HTTP ${res.status}: ${errText.slice(0, 180)}`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        status: 0,
+        permanentError: false,
+        error: err instanceof Error ? err.message : 'Network error',
+      };
     }
   }
 
   /**
-   * Starts lightweight Realtime presence/polling channel `topchan-ops-live` when Supabase is configured.
+   * Connects to Supabase Realtime WebSocket (`topchan-ops-live` / Phoenix channel on property_snapshots).
+   * Sets `realtimeConnected = true` ONLY when the Realtime server confirms `SUBSCRIBED` (`phx_reply` ok).
+   * Runs 15-second REST polling strictly as a resilient fallback whenever WebSocket is disconnected.
    */
   startRealtimeChannel(propertyId: string, onRemoteChange: () => void): () => void {
     if (!this.isConfigured || typeof window === 'undefined') {
+      this.realtimeConnected = false;
+      this.emit();
       return () => {};
     }
+
+    let disposed = false;
     let lastSeenUpdatedAt: string | null = null;
-    this.realtimeConnected = true;
+    let phxRef = 0;
+
+    // Start strictly disconnected until Realtime confirms SUBSCRIBED
+    this.realtimeConnected = false;
     this.emit();
 
-    const poll = async () => {
-      if (!this.isOnline || !this.baseUrl || !this.anonKey) return;
+    const clearSocketTimers = () => {
+      if (this.heartbeatTimer !== null) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
+      if (this.reconnectTimer !== null) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+    };
+
+    const connectRealtimeWs = () => {
+      if (disposed || !this.baseUrl || !this.anonKey || typeof WebSocket === 'undefined') {
+        return;
+      }
+      try {
+        const wsBase = this.baseUrl.replace(/^https:\/\//i, 'wss://');
+        const wsUrl = `${wsBase}/realtime/v1/websocket?apikey=${encodeURIComponent(this.anonKey)}&vsn=1.0.0`;
+        const socket = new WebSocket(wsUrl);
+        this.ws = socket;
+
+        const topic = 'realtime:topchan-ops-live';
+        let joinRef = '';
+
+        socket.addEventListener('open', () => {
+          if (disposed) {
+            socket.close();
+            return;
+          }
+          joinRef = String(++phxRef);
+          const jwt = this.accessToken?.trim() || this.anonKey;
+          socket.send(
+            JSON.stringify({
+              topic,
+              event: 'phx_join',
+              payload: {
+                config: {
+                  broadcast: { ack: false, self: false },
+                  presence: { key: propertyId },
+                  postgres_changes: [
+                    {
+                      event: '*',
+                      schema: 'public',
+                      table: 'property_snapshots',
+                      filter: `property_id=eq.${propertyId}`,
+                    },
+                  ],
+                },
+                access_token: jwt,
+              },
+              ref: joinRef,
+            })
+          );
+
+          if (this.heartbeatTimer !== null) clearInterval(this.heartbeatTimer);
+          this.heartbeatTimer = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(
+                JSON.stringify({
+                  topic: 'phoenix',
+                  event: 'heartbeat',
+                  payload: {},
+                  ref: String(++phxRef),
+                })
+              );
+            }
+          }, 25_000);
+        });
+
+        socket.addEventListener('message', (event) => {
+          if (disposed) return;
+          try {
+            const msg = JSON.parse(String(event.data)) as {
+              topic?: string;
+              event?: string;
+              ref?: string;
+              payload?: { status?: string; data?: { record?: { updated_at?: string } } };
+            };
+            if (msg.topic === topic && msg.event === 'phx_reply' && msg.ref === joinRef) {
+              const subscribed = msg.payload?.status === 'ok';
+              this.realtimeConnected = subscribed;
+              this.emit();
+              return;
+            }
+            if (msg.topic === topic && (msg.event === 'postgres_changes' || msg.event === 'UPDATE' || msg.event === 'INSERT')) {
+              const ts = msg.payload?.data?.record?.updated_at;
+              if (ts) lastSeenUpdatedAt = ts;
+              onRemoteChange();
+            }
+            if (msg.topic === topic && (msg.event === 'phx_error' || msg.event === 'phx_close')) {
+              this.realtimeConnected = false;
+              this.emit();
+            }
+          } catch {
+            // Ignore non-JSON frames
+          }
+        });
+
+        const handleDisconnect = () => {
+          if (this.ws === socket) {
+            this.ws = null;
+          }
+          if (this.heartbeatTimer !== null) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+          }
+          if (this.realtimeConnected) {
+            this.realtimeConnected = false;
+            this.emit();
+          }
+          if (!disposed && this.isOnline) {
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              connectRealtimeWs();
+            }, 10_000);
+          }
+        };
+
+        socket.addEventListener('close', handleDisconnect);
+        socket.addEventListener('error', handleDisconnect);
+      } catch {
+        this.realtimeConnected = false;
+        this.emit();
+      }
+    };
+
+    const pollFallback = async () => {
+      // Strictly fallback: skip REST polling while WebSocket Realtime is actively SUBSCRIBED
+      if (disposed || this.realtimeConnected || !this.isOnline || !this.baseUrl || !this.anonKey) {
+        return;
+      }
       try {
         const bearer = this.accessToken?.trim() || this.anonKey;
-        const res = await fetch(
+        const res = await this.fetchImpl(
           `${this.baseUrl}/rest/v1/property_snapshots?property_id=eq.${encodeURIComponent(
             propertyId
           )}&select=updated_at&limit=1`,
@@ -355,13 +670,24 @@ export class SupabaseNormalizedSync {
       }
     };
 
-    this.pollTimer = window.setInterval(() => {
-      void poll();
+    connectRealtimeWs();
+    this.pollTimer = setInterval(() => {
+      void pollFallback();
     }, 15_000);
 
     return () => {
+      disposed = true;
+      clearSocketTimers();
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {
+          // ignore close error
+        }
+        this.ws = null;
+      }
       if (this.pollTimer !== null) {
-        window.clearInterval(this.pollTimer);
+        clearInterval(this.pollTimer);
         this.pollTimer = null;
       }
       this.realtimeConnected = false;
@@ -374,9 +700,25 @@ export class SupabaseNormalizedSync {
       if (this.onlineHandler) window.removeEventListener('online', this.onlineHandler);
       if (this.offlineHandler) window.removeEventListener('offline', this.offlineHandler);
     }
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        // ignore
+      }
+      this.ws = null;
+    }
     if (this.pollTimer !== null) {
-      window.clearInterval(this.pollTimer);
+      clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 }

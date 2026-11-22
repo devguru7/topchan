@@ -12,7 +12,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/utils/logic.test.ts src/store/opsReducer.test.ts",
+    "test": "TOPCHAN_TEST_NO_LISTEN=1 tsx --test src/utils/logic.test.ts src/store/opsReducer.test.ts src/utils/auditFixes.test.ts",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
