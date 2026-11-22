@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Briefcase,
   FastForward,
+  Link2,
   Minus,
   Package,
   Phone,
@@ -11,6 +12,7 @@ import {
   Printer,
   QrCode,
   Star,
+  UtensilsCrossed,
   WashingMachine,
   Wifi,
 } from 'lucide-react';
@@ -21,6 +23,7 @@ import { formatTimer } from '../../utils/math';
 import { CopyButton, EmptyState, SegmentedControl, StatusPill, type StatusTone } from '../ui';
 import { HousekeepingBoard } from '../HousekeepingBoard';
 import { LuggageTracker } from '../LuggageTracker';
+import { CookBreakfastBoard } from '../CookBreakfastBoard';
 
 const QR_COPY: Record<
   GuestLang,
@@ -239,6 +242,23 @@ export const ServicesTab: React.FC = () => {
   const activeLaundryCount = state.laundryJobs.filter((j) => j.status === 'running').length;
   const storedLuggageCount = state.luggageItems.filter((l) => l.status === 'stored').length;
   const lowStockCount = state.stockItems.filter((i) => i.quantity <= i.minThreshold).length;
+  const pendingLateBreakfastCount = (state.lateBreakfastOrders ?? []).filter(
+    (o) => o.status === 'pending'
+  ).length;
+
+  const cookDirectUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}/?mode=cook` : '/?mode=cook';
+
+  const handleCopyCookLink = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(cookDirectUrl).catch(() => {});
+    }
+    pushToast(
+      'Ссылка для повара скопирована',
+      `${cookDirectUrl} — отправьте в WhatsApp или Telegram кухни`,
+      'emerald'
+    );
+  };
 
   const subTabOptions = useMemo<
     Array<{
@@ -254,6 +274,12 @@ export const ServicesTab: React.FC = () => {
         label: 'Стирка и уборка',
         icon: WashingMachine,
         badge: pendingHkTasks.length + activeLaundryCount,
+      },
+      {
+        id: 'breakfast',
+        label: 'Кухня и завтраки',
+        icon: UtensilsCrossed,
+        badge: pendingLateBreakfastCount,
       },
       {
         id: 'luggage_transfers',
@@ -273,7 +299,13 @@ export const ServicesTab: React.FC = () => {
         icon: QrCode,
       },
     ],
-    [pendingHkTasks.length, activeLaundryCount, storedLuggageCount, lowStockCount]
+    [
+      pendingHkTasks.length,
+      activeLaundryCount,
+      pendingLateBreakfastCount,
+      storedLuggageCount,
+      lowStockCount,
+    ]
   );
 
   const handleStartLaundry = (e: React.FormEvent) => {
@@ -458,6 +490,32 @@ export const ServicesTab: React.FC = () => {
           <section className="lg:col-span-6 ops-card p-5">
             <HousekeepingBoard compact />
           </section>
+        </div>
+      )}
+
+      {/* SUB-TAB 1.5: Kitchen & Breakfast Board */}
+      {servicesSubTab === 'breakfast' && (
+        <div className="space-y-4">
+          <div className="ops-card px-4 py-3 flex flex-wrap items-center justify-between gap-3 no-print">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-[var(--text-primary)]">
+                Отдельный экран для планшета или телефона повара
+              </div>
+              <div className="text-xs text-[var(--text-muted)] font-mono truncate mt-0.5">
+                {cookDirectUrl}
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="services-copy-cook-link-btn"
+              onClick={handleCopyCookLink}
+              className="ops-brand-btn min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+            >
+              <Link2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              Скопировать ссылку для повара (?mode=cook)
+            </button>
+          </div>
+          <CookBreakfastBoard />
         </div>
       )}
 

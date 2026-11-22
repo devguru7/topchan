@@ -10,6 +10,7 @@ import {
   FileJson,
   FileSpreadsheet,
   History,
+  Link2,
   Loader2,
   Mail,
   MessageSquareText,
@@ -18,6 +19,7 @@ import {
   RotateCcw,
   Save,
   Shield,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { useOps } from '../../context/OpsContext';
 import type { SettingsSubTab } from '../../context/UIContext';
@@ -248,6 +250,32 @@ export const SettingsTab: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid="copy-cook-link-btn"
+            onClick={() => {
+              const url =
+                typeof window !== 'undefined'
+                  ? `${window.location.origin}/?mode=cook`
+                  : '/?mode=cook';
+              if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                navigator.clipboard.writeText(url).catch(() => {});
+              }
+              pushToast(
+                'Ссылка для повара скопирована',
+                `${url} — только кухня и завтраки, без финансов и паспортов`,
+                'emerald'
+              );
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] text-xs font-semibold text-[var(--text-primary)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] inline-flex items-center gap-2 transition-colors"
+          >
+            <UtensilsCrossed
+              className="w-4 h-4 shrink-0"
+              strokeWidth={1.75}
+              style={{ color: 'var(--brand-primary)' }}
+            />
+            Ссылка для повара (?mode=cook)
+          </button>
           <button
             type="button"
             onClick={() => setSidePanelOpen((v) => !v)}
@@ -938,6 +966,28 @@ export const SettingsTab: React.FC = () => {
               </div>
             </div>
             <div className="space-y-2">
+              <button
+                type="button"
+                data-testid="integrations-copy-cook-link-btn"
+                onClick={() => {
+                  const url =
+                    typeof window !== 'undefined'
+                      ? `${window.location.origin}/?mode=cook`
+                      : '/?mode=cook';
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(url).catch(() => {});
+                  }
+                  pushToast(
+                    'Ссылка для повара скопирована',
+                    `${url} — откройте на планшете или телефоне кухни`,
+                    'emerald'
+                  );
+                }}
+                className="ops-brand-btn w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-2"
+              >
+                <Link2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                Скопировать ссылку для повара (?mode=cook)
+              </button>
               <button
                 type="button"
                 onClick={() => setSidePanelOpen((v) => !v)}

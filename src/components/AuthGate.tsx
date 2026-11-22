@@ -38,7 +38,9 @@ function readStoredSession(): StoredSession | null {
         accessToken: parsed.accessToken,
         email: parsed.email,
         role:
-          parsed.role === 'manager' || parsed.role === 'housekeeping'
+          parsed.role === 'manager' ||
+          parsed.role === 'housekeeping' ||
+          parsed.role === 'cook'
             ? parsed.role
             : 'admin',
       };
@@ -99,7 +101,10 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
       }
       const metaRole = data.user?.app_metadata?.role || data.user?.user_metadata?.role;
       const resolvedRole: AppUserRole =
-        metaRole === 'housekeeping' || metaRole === 'manager' || metaRole === 'admin'
+        metaRole === 'housekeeping' ||
+        metaRole === 'manager' ||
+        metaRole === 'admin' ||
+        metaRole === 'cook'
           ? metaRole
           : selectedRole;
       const nextSession: StoredSession = {
@@ -181,6 +186,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <option value="admin">Администратор (полный доступ)</option>
               <option value="manager">Управляющий / Менеджер</option>
               <option value="housekeeping">Горничная (мобильная доска уборки)</option>
+              <option value="cook">Повар / Кухня (завтраки)</option>
             </select>
           </div>
 

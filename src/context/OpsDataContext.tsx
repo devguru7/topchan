@@ -57,6 +57,7 @@ import type {
   SplitStayPayload,
   StartLaundryPayload,
   SubmitGuestQrPayload,
+  UpdateBookingKitchenMetaPayload,
   UpsertGuestProfilePayload,
 } from '../store/types';
 import { useUI } from './UIContext';
@@ -121,6 +122,9 @@ export interface OpsDataContextValue {
   updateIntegrationSettings: (patch: Partial<IntegrationSettings>) => void;
   importBnovoDemoBooking: () => void;
   markGuestEmehmonRegistered: (bookingId: string, guestId: string) => void;
+  serveLateBreakfastOrder: (orderId: string) => void;
+  toggleKitchenChecklistItem: (id: string) => void;
+  updateBookingKitchenMeta: (payload: UpdateBookingKitchenMetaPayload) => void;
   resetDemoData: () => void;
 }
 
@@ -1135,6 +1139,33 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pushToast]
   );
 
+  const serveLateBreakfastOrder = useCallback(
+    (orderId: string) => {
+      const target = (stateRef.current.lateBreakfastOrders ?? []).find((o) => o.id === orderId);
+      dispatch({ type: 'SERVE_LATE_BREAKFAST', payload: { orderId } });
+      if (target) {
+        pushToast(
+          'Поздний завтрак подан',
+          `${target.roomLabel} · ${target.portions} порц. отмечено выполненным`,
+          'emerald'
+        );
+      }
+    },
+    [pushToast]
+  );
+
+  const toggleKitchenChecklistItem = useCallback((id: string) => {
+    dispatch({ type: 'TOGGLE_KITCHEN_CHECKLIST', payload: { id } });
+  }, []);
+
+  const updateBookingKitchenMeta = useCallback(
+    (payload: UpdateBookingKitchenMetaPayload) => {
+      dispatch({ type: 'UPDATE_BOOKING_KITCHEN_META', payload });
+      pushToast('Данные для кухни обновлены', 'Время заезда и диетические пометки сохранены', 'emerald');
+    },
+    [pushToast]
+  );
+
   const resetDemoData = useCallback(() => {
     dispatch({ type: 'RESET_DEMO_DATA' });
     setSelectedBookingId(null);
@@ -1194,6 +1225,9 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateIntegrationSettings,
       importBnovoDemoBooking,
       markGuestEmehmonRegistered,
+      serveLateBreakfastOrder,
+      toggleKitchenChecklistItem,
+      updateBookingKitchenMeta,
       resetDemoData,
     }),
     [
@@ -1246,6 +1280,9 @@ export const OpsDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updateIntegrationSettings,
       importBnovoDemoBooking,
       markGuestEmehmonRegistered,
+      serveLateBreakfastOrder,
+      toggleKitchenChecklistItem,
+      updateBookingKitchenMeta,
       resetDemoData,
     ]
   );

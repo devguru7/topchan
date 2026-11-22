@@ -5,6 +5,7 @@ import type {
   CashPocketId,
   CurrencyCode,
   CurrencySettings,
+  DietaryTag,
   GuestTag,
   IntegrationSettings,
   LedgerEntry,
@@ -28,6 +29,7 @@ export interface CheckInPayload {
   nightlyRateUsd: number;
   guests: Array<Omit<StayGuest, 'id'>>;
   source: BookingGroup['source'];
+  expectedArrivalTime?: string;
   notes?: string;
   initialPayment?: {
     amountUsdEquivalent: number;
@@ -159,6 +161,16 @@ export interface UpsertGuestProfilePayload {
   notes: string;
 }
 
+export interface UpdateBookingKitchenMetaPayload {
+  bookingId: string;
+  expectedArrivalTime?: string;
+  guestDietary?: Array<{
+    guestId: string;
+    dietaryTags: DietaryTag[];
+    dietaryNote?: string;
+  }>;
+}
+
 export type OpsAction =
   | { type: 'CHECK_IN'; payload: CheckInPayload; nowIso?: string; todayIso?: string }
   | { type: 'CHECK_OUT'; payload: CheckOutPayload; nowIso?: string; timeHm?: string }
@@ -248,6 +260,9 @@ export type OpsAction =
       payload: { cbuUsd: number; cbuEur: number; updatedAt?: string };
     }
   | { type: 'UPDATE_INTEGRATIONS'; payload: Partial<IntegrationSettings> }
+  | { type: 'SERVE_LATE_BREAKFAST'; payload: { orderId: string }; timeHm?: string }
+  | { type: 'TOGGLE_KITCHEN_CHECKLIST'; payload: { id: string }; timeHm?: string }
+  | { type: 'UPDATE_BOOKING_KITCHEN_META'; payload: UpdateBookingKitchenMetaPayload }
   | { type: 'HYDRATE_STATE'; payload: AppState }
   | { type: 'RESET_DEMO_DATA'; payload?: { baseDateIso?: string } };
 

@@ -17,6 +17,7 @@ import {
   Search,
   Sun,
   Users,
+  UtensilsCrossed,
   WashingMachine,
 } from 'lucide-react';
 import { OpsProvider, useOps, useTimers } from './context/OpsContext';
@@ -34,6 +35,7 @@ import { AuthGate } from './components/AuthGate';
 import { NightAuditModal } from './components/NightAuditModal';
 import { WelcomeCardModal } from './components/WelcomeCardModal';
 import { HousekeepingBoard } from './components/HousekeepingBoard';
+import { CookBreakfastBoard } from './components/CookBreakfastBoard';
 import { GuestFolioDrawer } from './components/modals/GuestFolioDrawer';
 import { CheckInModal } from './components/modals/CheckInModal';
 import { CheckOutModal } from './components/modals/CheckOutModal';
@@ -87,6 +89,56 @@ const ROLE_LABELS: Record<AppUserRole, string> = {
   admin: 'Админ',
   manager: 'Менеджер',
   housekeeping: 'Горничная',
+  cook: 'Повар',
+};
+
+/**
+ * Isolated standalone Kitchen/Cook View opened via direct link `/?mode=cook`.
+ * Strictly zero access to reception tabs, cash balances, debts, passports, or CommandPalette.
+ */
+const CookStandaloneView: React.FC = () => {
+  const { theme, toggleTheme } = useOps();
+  return (
+    <div
+      data-testid="cook-standalone-view"
+      className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col"
+    >
+      <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-3 no-print">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <TopchanMark size={28} className="shrink-0" />
+          <div className="min-w-0">
+            <div className="text-sm font-bold tracking-tight text-[var(--text-primary)] truncate">
+              Topchan · Кухня
+            </div>
+            <div className="text-[11px] text-[var(--text-muted)]">
+              Прямой экран повара
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <TashkentClock />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label="Переключить тему"
+            className="w-11 h-11 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-secondary)]"
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-4 h-4" strokeWidth={1.75} />
+            ) : (
+              <Moon className="w-4 h-4" strokeWidth={1.75} />
+            )}
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-5">
+        <CookBreakfastBoard />
+      </main>
+      <ToastStack />
+    </div>
+  );
 };
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -136,7 +188,7 @@ const OpsWorkspace: React.FC = () => {
   // Desktop Keyboard Power Mode: Cmd/Ctrl+K, 1-6 tabs, N quick check-in, Esc close overlays
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (userRole === 'housekeeping') return;
+      if (userRole === 'housekeeping' || userRole === 'cook') return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setCommandPaletteOpen((open) => !open);
@@ -406,6 +458,59 @@ const OpsWorkspace: React.FC = () => {
     );
   }
 
+  // Dedicated mobile-first Cook / Kitchen Shell when role is 'cook'
+  if (userRole === 'cook') {
+    return (
+      <div
+        data-testid="cook-role-shell"
+        className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col"
+      >
+        <header className="sticky top-0 z-30 h-16 bg-[var(--bg-surface)]/95 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-3 no-print">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <TopchanMark size={28} className="shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-bold tracking-tight text-[var(--text-primary)] truncate">
+                Topchan · Кухня
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)]">
+                Режим повара (без финансов и паспортов)
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <TashkentClock />
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label="Переключить тему"
+              className="w-11 h-11 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-secondary)]"
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4" strokeWidth={1.75} />
+              ) : (
+                <Moon className="w-4 h-4" strokeWidth={1.75} />
+              )}
+            </button>
+            <button
+              type="button"
+              data-testid="role-switch-admin"
+              onClick={() => setUserRole('admin')}
+              className="min-h-[44px] px-3.5 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-strong)] text-xs font-semibold text-[var(--text-primary)]"
+            >
+              Ресепшн →
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-5">
+          <CookBreakfastBoard />
+        </main>
+        <ToastStack />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col lg:flex-row">
       {/* Desktop Deep Hospitality Navy Sidebar (248px, >= 1024px) */}
@@ -521,16 +626,19 @@ const OpsWorkspace: React.FC = () => {
                 {state.adminName}
               </span>
             </div>
-            <div className="flex items-center justify-between gap-2">
+            <div className="space-y-1.5">
               <span style={{ color: 'var(--sidebar-muted)' }}>Роль</span>
-              <div className="inline-flex rounded-lg p-0.5 gap-0.5" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
-                {(['admin', 'manager', 'housekeeping'] as AppUserRole[]).map((role) => (
+              <div
+                className="grid grid-cols-2 rounded-lg p-0.5 gap-0.5"
+                style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
+              >
+                {(['admin', 'manager', 'housekeeping', 'cook'] as AppUserRole[]).map((role) => (
                   <button
                     key={role}
                     type="button"
                     data-testid={`sidebar-role-${role}`}
                     onClick={() => setUserRole(role)}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                    className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
                       userRole === role
                         ? 'bg-[var(--brand-primary)] text-white'
                         : 'text-[var(--sidebar-muted)] hover:text-white'
@@ -670,7 +778,17 @@ const OpsWorkspace: React.FC = () => {
               <span>{syncDisplay.label}</span>
             </button>
 
-            {/* Mobile/Tablet Role Quick Switch to Housekeeping */}
+            {/* Mobile/Tablet Role Quick Switch to Housekeeping & Cook */}
+            <button
+              type="button"
+              data-testid="mobile-cook-toggle"
+              onClick={() => setUserRole('cook')}
+              aria-label="Перейти в режим повара"
+              title="Режим повара (Кухня)"
+              className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] transition-colors shrink-0"
+            >
+              <UtensilsCrossed className="w-4 h-4" strokeWidth={1.75} />
+            </button>
             <button
               type="button"
               data-testid="mobile-housekeeping-toggle"
@@ -905,7 +1023,9 @@ export default function App() {
     typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search)
       : new URLSearchParams();
-  const isGuestMode = params.get('mode') === 'guest';
+  const modeParam = params.get('mode');
+  const isGuestMode = modeParam === 'guest';
+  const isCookMode = modeParam === 'cook';
   const roomParam = params.get('room');
 
   return (
@@ -914,6 +1034,8 @@ export default function App() {
         <OpsProvider>
           {isGuestMode ? (
             <GuestStandaloneView roomParam={roomParam} />
+          ) : isCookMode ? (
+            <CookStandaloneView />
           ) : (
             <AuthGate>
               <OpsWorkspace />

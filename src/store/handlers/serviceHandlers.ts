@@ -604,3 +604,43 @@ export function handleDismissMailInquiry(state: AppState, payload: { id: string 
     ),
   };
 }
+
+export function handleServeLateBreakfast(
+  state: AppState,
+  payload: { orderId: string },
+  timeHm = formatTashkentHm()
+): AppState {
+  const orders = state.lateBreakfastOrders ?? [];
+  const target = orders.find((o) => o.id === payload.orderId);
+  if (!target || target.status === 'served') return state;
+
+  return {
+    ...state,
+    lateBreakfastOrders: orders.map((o) =>
+      o.id === payload.orderId
+        ? { ...o, status: 'served' as const, servedAt: timeHm }
+        : o
+    ),
+  };
+}
+
+export function handleToggleKitchenChecklist(
+  state: AppState,
+  payload: { id: string },
+  timeHm = formatTashkentHm()
+): AppState {
+  const list = state.kitchenChecklist ?? [];
+  return {
+    ...state,
+    kitchenChecklist: list.map((item) => {
+      if (item.id !== payload.id) return item;
+      const nextDone = !item.done;
+      return {
+        ...item,
+        done: nextDone,
+        doneAt: nextDone ? timeHm : undefined,
+      };
+    }),
+  };
+}
+

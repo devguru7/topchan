@@ -13,6 +13,7 @@ import {
   handleMoveOrResizeSegment,
   handleRestoreBookingsAndRooms,
   handleSplitStayBooking,
+  handleUpdateBookingKitchenMeta,
 } from './handlers/bookingHandlers';
 import {
   handleAddPettyCash,
@@ -35,12 +36,14 @@ import {
   handleReleaseLuggage,
   handleResolveLostFound,
   handleResolveTelegramAlert,
+  handleServeLateBreakfast,
   handleSetRoomHousekeepingStatus,
   handleSpeedUpLaundry,
   handleStartHousekeepingTask,
   handleStartLaundry,
   handleSubmitGuestQrRequest,
   handleToggleChecklist,
+  handleToggleKitchenChecklist,
   handleUpdateTelegramAlertDraft,
   handleUpsertGuestProfile,
 } from './handlers/serviceHandlers';
@@ -148,6 +151,12 @@ function applyAction(state: AppState, action: OpsAction): AppState {
       return handleApplyLiveCbuRates(state, action.payload);
     case 'UPDATE_INTEGRATIONS':
       return handleUpdateIntegrationSettings(state, action.payload);
+    case 'SERVE_LATE_BREAKFAST':
+      return handleServeLateBreakfast(state, action.payload, action.timeHm);
+    case 'TOGGLE_KITCHEN_CHECKLIST':
+      return handleToggleKitchenChecklist(state, action.payload, action.timeHm);
+    case 'UPDATE_BOOKING_KITCHEN_META':
+      return handleUpdateBookingKitchenMeta(state, action.payload);
     case 'HYDRATE_STATE':
       return handleHydrateState(state, action.payload);
     case 'RESET_DEMO_DATA':

@@ -19,6 +19,7 @@ import {
   type IssueRefundPayload,
   type MoveOrResizeSegmentPayload,
   type SplitStayPayload,
+  type UpdateBookingKitchenMetaPayload,
 } from '../types';
 
 export function validateFemaleOnlyRoom(
@@ -264,6 +265,7 @@ export function handleCheckIn(
     bnovoId: `BN-${Math.floor(49000 + Math.random() * 9000)}`,
     status: 'active',
     checkOutTime: '12:00',
+    expectedArrivalTime: payload.expectedArrivalTime?.trim() || undefined,
     checkingOutToday: toDate === todayIso,
     source: payload.source,
     notes: payload.notes,
@@ -405,10 +407,28 @@ export function handleAddLedgerCharge(
     ];
   }
 
+  let nextLateBreakfasts = state.lateBreakfastOrders ?? [];
+  if (payload.category === 'late_breakfast') {
+    nextLateBreakfasts = [
+      {
+        id: makeId('lb'),
+        propertyId: state.propertyId,
+        bookingId: payload.bookingId,
+        roomLabel,
+        portions: 1,
+        requestedAt: formatTashkentHm(),
+        status: 'pending' as const,
+        note: payload.label,
+      },
+      ...nextLateBreakfasts,
+    ];
+  }
+
   return {
     ...state,
     bookings: nextBookings,
     laundryJobs: nextLaundry,
+    lateBreakfastOrders: nextLateBreakfasts,
     auditLog: [
       {
         id: makeId('aud'),
@@ -984,6 +1004,7 @@ export function handleCommitParsedCommand(
   ];
 
   const nextLaundry = [...state.laundryJobs];
+  const nextLateBreakfasts = [...(state.lateBreakfastOrders ?? [])];
 
   for (const extra of cmd.extras) {
     ledgerEntries.push({
@@ -1009,6 +1030,17 @@ export function handleCommitParsedCommand(
         remainingSeconds: secs,
         status: 'running',
         startedAt: nowIso,
+      });
+    } else if (extra.type === 'late_breakfast') {
+      nextLateBreakfasts.unshift({
+        id: makeId('lb'),
+        propertyId: state.propertyId,
+        bookingId,
+        roomLabel: cmd.roomLabel,
+        portions: 1,
+        requestedAt: formatTashkentHm(),
+        status: 'pending',
+        note: extra.label,
       });
     }
   }
@@ -1147,6 +1179,7 @@ export function handleCommitParsedCommand(
     pockets: nextPockets,
     transactions: nextTransactions,
     laundryJobs: nextLaundry,
+    lateBreakfastOrders: nextLateBreakfasts,
     auditLog: [
       {
         id: makeId('aud'),
@@ -1178,6 +1211,41 @@ export function handleMarkEmehmonRegistered(
           }
         : b
     ),
+  };
+}
+
+export function handleUpdateBookingKitchenMeta(
+  state: AppState,
+  payload: UpdateBookingKitchenMetaPayload
+): AppState {
+  const bkg = state.bookings.find((b) => b.id === payload.bookingId);
+  if (!bkg) return state;
+
+  const dietaryMap = new Map(
+    (payload.guestDietary ?? []).map((item) => [item.guestId, item])
+  );
+
+  return {
+    ...state,
+    bookings: state.bookings.map((b) => {
+      if (b.id !== payload.bookingId) return b;
+      return {
+        ...b,
+        expectedArrivalTime:
+          payload.expectedArrivalTime !== undefined
+            ? payload.expectedArrivalTime.trim() || undefined
+            : b.expectedArrivalTime,
+        guests: b.guests.map((g) => {
+          const patch = dietaryMap.get(g.id);
+          if (!patch) return g;
+          return {
+            ...g,
+            dietaryTags: patch.dietaryTags.length > 0 ? patch.dietaryTags : undefined,
+            dietaryNote: patch.dietaryNote?.trim() || undefined,
+          };
+        }),
+      };
+    }),
   };
 }
 

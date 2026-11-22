@@ -8,7 +8,7 @@ export type GridViewMode = 'tape' | 'cards';
 export type GridFilterId = 'all' | 'available' | 'occupied' | 'checkout' | 'debt' | 'dirty';
 export type ShiftSubTab = 'autopilot' | 'emehmon';
 export type SettingsSubTab = 'telegram' | 'currency' | 'rooms' | 'integrations' | 'audit';
-export type ServicesSubTab = 'laundry_hk' | 'luggage_transfers' | 'stock_contacts' | 'qr_guide';
+export type ServicesSubTab = 'laundry_hk' | 'breakfast' | 'luggage_transfers' | 'stock_contacts' | 'qr_guide';
 
 const THEME_STORAGE_KEY = 'topchan_ui_theme';
 

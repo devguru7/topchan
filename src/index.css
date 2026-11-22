@@ -383,4 +383,22 @@
     padding: 28px !important;
     z-index: 9999 !important;
   }
+
+  body[data-print-target="kitchen-sheet"] * {
+    visibility: hidden;
+  }
+  body[data-print-target="kitchen-sheet"] #printable-kitchen-sheet,
+  body[data-print-target="kitchen-sheet"] #printable-kitchen-sheet * {
+    visibility: visible !important;
+  }
+  body[data-print-target="kitchen-sheet"] #printable-kitchen-sheet {
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #14171f !important;
+    padding: 24px !important;
+    z-index: 9999 !important;
+  }
 }
